@@ -1,4 +1,4 @@
-# wPerf-rs Final Design Specification
+# wPerf Final Design Specification
 
 > **Status:** Approved for implementation
 > **Date:** 2026-03-17
@@ -24,7 +24,7 @@
 
 ### 1.1 Goals & Scope
 
-wPerf-rs is an industrial-grade Rust reimplementation of the OSDI'18 wPerf paper. The core goal is to build a thread-level Wait-For Graph that uses cascade redistribution and Knot detection to precisely locate global performance bottlenecks in multi-threaded systems.
+wPerf is an industrial-grade Rust reimplementation of the OSDI'18 wPerf paper. The core goal is to build a thread-level Wait-For Graph that uses cascade redistribution and Knot detection to precisely locate global performance bottlenecks in multi-threaded systems.
 
 Unlike traditional off-CPU flame graphs, wPerf solves a fundamental problem: **local long waits do not equal global bottlenecks.** It uses graph-theoretic methods (SCC, condensation DAG, critical path) to identify true system-wide bottlenecks.
 
@@ -32,7 +32,7 @@ Unlike traditional off-CPU flame graphs, wPerf solves a fundamental problem: **l
 
 > Decision rationale: [ADR-001: Offline CLI Model vs Backend Service](../decisions/ADR-001.md)
 
-wPerf-rs adopts a fully offline CLI tool model, aligning with the `perf record` / `perf report` user mental model:
+wPerf adopts a fully offline CLI tool model, aligning with the `perf record` / `perf report` user mental model:
 
 ```
 wperf record [options]    # Collect: BPF probes → .wperf binary file
@@ -105,7 +105,7 @@ This is resolved by the CO-RE compiler at load time with zero runtime overhead.
 
 #### Paper Alignment Table
 
-| Paper Probe | wPerf-rs Probe | Category |
+| Paper Probe | wPerf Probe | Category |
 |-------------|---------------|----------|
 | `sched_switch` | `tp/sched/sched_switch` | **Core** (mandatory) |
 | `sched_wakeup` | `tp/sched/sched_wakeup` | **Core** (mandatory) |
@@ -257,13 +257,13 @@ Topological sort is undefined on cyclic graphs (would skip cycle nodes or panic)
 
 > Decision rationale: [ADR-012: "No False Negatives" Guarantee](../decisions/ADR-012.md)
 
-wPerf-rs makes **no mathematical guarantee of zero false negatives.** Three real-world conditions break complete coverage:
+wPerf makes **no mathematical guarantee of zero false negatives.** Three real-world conditions break complete coverage:
 
 1. **Ring buffer overflow:** Events may be dropped under extreme load (no backpressure)
 2. **Clock skew:** NTP adjustments can cause timestamp ordering violations
 3. **Sampling granularity:** Context switch tracing has inherent resolution limits
 
-Instead, wPerf-rs provides a **practical coverage assurance:** given sufficient ring buffer capacity and stable system clocks, the sched_switch + sched_wakeup tracepoint pair captures all scheduler-mediated thread interactions. The `drop_counter` metric quantifies event loss for each collection session.
+Instead, wPerf provides a **practical coverage assurance:** given sufficient ring buffer capacity and stable system clocks, the sched_switch + sched_wakeup tracepoint pair captures all scheduler-mediated thread interactions. The `drop_counter` metric quantifies event loss for each collection session.
 
 ---
 
