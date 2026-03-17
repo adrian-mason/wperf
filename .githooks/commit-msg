@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Enforce commit message rules for wperf
+# - Auto-append Signed-off-by if missing
+# - Reject Co-Authored-By lines
+set -euo pipefail
+
+MSG_FILE="$1"
+SIGNOFF="Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>"
+
+# 1. Reject Co-Authored-By (check before modifying)
+if grep -qi "Co-Authored-By" "$MSG_FILE"; then
+    echo "ERROR: Co-Authored-By is not allowed in this project. Remove it and commit again." >&2
+    exit 1
+fi
+
+# 2. Auto-append Signed-off-by if missing
+if ! grep -qF "$SIGNOFF" "$MSG_FILE"; then
+    printf '\n%s\n' "$SIGNOFF" >> "$MSG_FILE"
+fi
