@@ -163,6 +163,8 @@ A two-layer approach:
 
 **Deep path (Phase 3):** Elastic Stack Delta — rather than unwinding the full stack on every context switch, capture only the delta between consecutive stacks for the same thread. This approach is production-validated at Elastic on millions of nodes. The delta is resolved in userspace using DWARF debug info via blazesym.
 
+When either path fails (fast path returns a suspiciously shallow stack ≤2 frames, or deep path encounters `bpf_probe_read_user` `-EFAULT`), the event is marked with `FLAG_PARTIAL_STACK` and `partial_stack_count` is incremented. Partial stacks are still usable for graph construction — only the flamegraph attribution is degraded.
+
 ### 2.4 BPF Event Structure
 
 Fixed-length 23-byte BaseEvent wrapped in a 5-byte TLV (Type-Length-Value) header:
@@ -180,6 +182,8 @@ Spurious wakeups (where a thread is woken but immediately goes back to sleep) ge
 1. The woken thread's actual running duration after wakeup
 2. If duration < configurable threshold (default: 50μs), the wakeup is classified as spurious
 3. Spurious wakeup edges are excluded from cascade redistribution
+
+Each filtered wakeup increments `false_wakeup_filtered_count`, providing visibility into how aggressively the filter is pruning. A high count relative to total wakeups may indicate the threshold needs tuning.
 
 ---
 
@@ -206,7 +210,7 @@ A 4-step finite state machine correlates raw BPF events into graph edges:
 1. **Parse:** Deserialize TLV records from .wperf file, validate checksums
 2. **Reorder:** Min-heap reorder buffer (1024 slots) compensates for per-CPU timestamp skew
 3. **Correlate:** Match sched_switch → sched_wakeup pairs by TID to form (waiter, holder, duration) edges
-4. **Orphan handling:** Wakeup events without a matching switch are logged and discarded
+4. **Orphan handling:** Wakeup events without a matching switch are logged, discarded, and tracked via `unmatched_wakeup_count`
 
 ### 3.3 Synthetic Edge Injection
 
@@ -215,7 +219,7 @@ A 4-step finite state machine correlates raw BPF events into graph edges:
 For I/O and softirq delays, synthetic pseudo-thread nodes are injected into the graph:
 
 - **Block I/O:** A `block_device:<dev>` pseudo-thread is created. `block_rq_issue` creates an edge from the requesting thread to the pseudo-thread; `block_rq_complete` creates the return edge.
-- **softirq:** A `softirq:<vec>` pseudo-thread is created for each softirq vector (NET_RX, BLOCK, TIMER, etc.).
+- **softirq:** A `softirq:<vec>` pseudo-thread is created for each softirq vector (NET_RX, BLOCK, TIMER, etc.). The `softirq_entry`/`softirq_exit` tracepoints track the active softirq vector per CPU. When a `sched_wakeup` fires within a tracked softirq context (e.g., `BLOCK_SOFTIRQ` or `NET_RX_SOFTIRQ`), the wakeup edge is attributed to the corresponding subsystem pseudo-thread (Disk or Network), bridging the causal gap between hardware interrupt completion and user-thread execution.
 
 Pseudo-threads participate in cascade redistribution and can appear in Knots, enabling attribution of delays to hardware/subsystem bottlenecks.
 
@@ -230,7 +234,7 @@ The cascade algorithm redistributes wait time from direct waiters to root-cause 
 - `path.insert` / `path.remove` outside the recursion loop (BUG-1 fix)
 - `child_subtree_absorbed = propagated_down + child_self_blame` (NEW-BUG-1 fix: leaf nodes must not have zero blame)
 - `sweep_line_partition` for O(N log N) time-slice partitioning ensuring weight conservation
-- Maximum recursion depth of 10 (practical limit for real workloads)
+- Maximum recursion depth of 10 (practical limit for real workloads); if exceeded, the branch is truncated and `cascade_depth_truncation_count` is incremented
 - Complexity: O(E × D × log K) where D=recursion depth ≤10, K=concurrent holders typically <5, effectively near-linear
 
 **Seven invariants** enforced via `debug_assert!` after every cascade run:
@@ -246,6 +250,8 @@ The cascade algorithm redistributes wait time from direct waiters to root-cause 
 | **I-7** | Locality: weight flows only along existing edges, bounded by time window intersection | Path traversal errors (BUG-1 class) |
 
 I-1 alone catches 4 of 5 known bugs discovered during pseudocode review — it is the highest-ROI invariant and must be implemented on Day 1 (~20 lines of code).
+
+While I-2 through I-7 are enforced via `debug_assert!` only (stripped in release builds to avoid performance overhead — e.g., I-5 idempotency requires running cascade twice), **I-1 (Weight conservation) is additionally validated at runtime in release mode** and exported as the `is_conserved` boolean flag in the final JSON output, serving as the production-level sentinel per [ADR-007](../decisions/ADR-007.md).
 
 ### 3.5 Tarjan SCC + Condensation + Knot Detection
 
@@ -285,7 +291,17 @@ wPerf makes **no mathematical guarantee of zero false negatives.** Three real-wo
 2. **Clock skew:** NTP adjustments can cause timestamp ordering violations
 3. **Sampling granularity:** Context switch tracing has inherent resolution limits
 
-Instead, wPerf provides a **practical coverage assurance:** given sufficient ring buffer capacity and stable system clocks, the sched_switch + sched_wakeup tracepoint pair captures all scheduler-mediated thread interactions. The `drop_counter` metric quantifies event loss for each collection session.
+Instead, wPerf provides a **practical coverage assurance** with quantified observability of its own coverage gaps. Five metrics are tracked and exported in the recording metadata and JSON output:
+
+| Metric | Source | What It Measures |
+|--------|--------|-----------------|
+| `drop_count` | BPF probe layer (§2.2) | Events lost to ring buffer overflow or perfarray overflow |
+| `unmatched_wakeup_count` | Event correlation (§3.2) | Wakeup events with no matching sched_switch — incomplete causal edges |
+| `partial_stack_count` | Stack unwinding (§2.3) | Events where stack capture failed or returned ≤2 frames |
+| `cascade_depth_truncation_count` | Cascade engine (§3.4) | Causal chains truncated at depth 10 — potential missed deep attribution |
+| `false_wakeup_filtered_count` | Spurious wakeup filter (§2.5) | Wakeup edges pruned as noise — indicates filter aggressiveness |
+
+These metrics transform the tool from a black-box oracle into a transparent instrument: users can assess data completeness and calibrate confidence in the results.
 
 ---
 
