@@ -101,7 +101,7 @@ This is resolved by the CO-RE compiler at load time with zero runtime overhead.
 | `Super-node` | A node in the Condensation DAG representing an entire SCC. Its weight uses the MAX heuristic of internal edges. |
 | `Knot` | A Sink SCC (out-degree 0 in Condensation DAG) containing ≥1 user thread. Represents a true systemic bottleneck or deadlock cycle. |
 | `Pseudo-thread` | A synthetic graph node representing a non-schedulable subsystem (e.g., disk I/O, softirq) for unified graph attribution. |
-| `Spurious Wakeup` | A wakeup where the thread runs for < 100μs before sleeping again. Filtered out as noise edges. |
+| `Spurious Wakeup` | A wakeup where the thread runs for < 50μs before sleeping again. Filtered out as noise edges. |
 | `is_conserved` | Boolean flag: true when total `attributed_delay` equals total `raw_wait` (Invariant I-1 holds). |
 
 ---
@@ -144,13 +144,22 @@ open() → probe_ringbuf() → if yes: set_autocreate(heap, false); use ringbuf 
 
 This avoids maintaining two separate BPF programs. The `EventTransport` trait in userspace abstracts the polling interface. See [ADR-004-supplement](../decisions/ADR-004-supplement.md) for user-space implementation details.
 
+#### Drop Detection
+
+BPF-layer event loss must be tracked to provide the coverage metrics required by [ADR-012](../decisions/ADR-012.md):
+
+- **Ringbuf path:** When `bpf_ringbuf_reserve()` returns NULL, a BPF-side `drop_counter` global is incremented. User-space reads this from the skeleton BSS section at the end of recording.
+- **Perfarray path:** The `lost_cb` callback in `perf_buffer__new()` fires with the count of lost samples per overflow. User-space accumulates these counts.
+
+Both paths expose a unified `drop_count` in the recording metadata, enabling users to assess data completeness.
+
 ### 2.3 Stack Unwinding — bpf_get_stackid + Elastic Stack Delta
 
 > Decision rationale: [ADR-005: Stack Unwinding Approach](../decisions/ADR-005.md)
 
 A two-layer approach:
 
-**Fast path:** `bpf_get_stackid(ctx, &stack_map, BPF_F_FAST_STACK_CMP)` — available since Linux 4.6, captures kernel + user stacks when frame pointers are present. Low overhead (~1μs), used on every sched_switch event.
+**Fast path:** `bpf_get_stackid(ctx, &stack_map, BPF_F_USER_STACK)` — available since Linux 4.6, captures user-space call stacks when frame pointers are present. Low overhead (~100ns, 4 bytes stack ID per event), used on every sched_switch event.
 
 **Deep path (Phase 3):** Elastic Stack Delta — rather than unwinding the full stack on every context switch, capture only the delta between consecutive stacks for the same thread. This approach is production-validated at Elastic on millions of nodes. The delta is resolved in userspace using DWARF debug info via blazesym.
 
@@ -169,7 +178,7 @@ Variable-length PayloadChunk: `tid(4) + data(N)`, optional Zstd compression. Max
 
 Spurious wakeups (where a thread is woken but immediately goes back to sleep) generate noise edges in the Wait-For Graph. These are filtered by checking:
 1. The woken thread's actual running duration after wakeup
-2. If duration < configurable threshold (default: 100μs), the wakeup is classified as spurious
+2. If duration < configurable threshold (default: 50μs), the wakeup is classified as spurious
 3. Spurious wakeup edges are excluded from cascade redistribution
 
 ---
