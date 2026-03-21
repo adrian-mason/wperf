@@ -94,11 +94,15 @@ This is resolved by the CO-RE compiler at load time with zero runtime overhead.
 
 | Term | Definition |
 |------|-----------|
-| `raw_wait_ms` | Direct observed wait time on a single edge (thread A waiting for thread B) |
-| `attributed_delay_ms` | Wait time after cascade redistribution — reflects actual contribution to global delay |
-| `Knot` | A strongly connected component (SCC) in the Wait-For Graph with out-degree 0 — threads deadlocking or forming a bottleneck cycle |
-| `Pseudo-thread` | A synthetic graph node representing a device or subsystem (e.g., block I/O device, softirq handler) for IO attribution |
-| `is_conserved` | Boolean flag: true when total attributed_delay equals total raw_wait (weight conservation invariant holds) |
+| `WFG (Wait-For Graph)` | The core directed graph. Nodes are threads/pseudo-threads; edges represent causal waiting relationships (waiter → waitee). |
+| `raw_wait_ms` | Direct observed physical wait time on a single edge before algorithmic processing. |
+| `attributed_delay_ms` | Wait time after Cascade redistribution — reflects actual root-cause contribution to global delay. |
+| `Condensation DAG` | A Directed Acyclic Graph formed by collapsing every SCC in the WFG into a single Super-node. |
+| `Super-node` | A node in the Condensation DAG representing an entire SCC. Its weight uses the MAX heuristic of internal edges. |
+| `Knot` | A Sink SCC (out-degree 0 in Condensation DAG) containing ≥1 user thread. Represents a true systemic bottleneck or deadlock cycle. |
+| `Pseudo-thread` | A synthetic graph node representing a non-schedulable subsystem (e.g., disk I/O, softirq) for unified graph attribution. |
+| `Spurious Wakeup` | A wakeup where the thread runs for < 100μs before sleeping again. Filtered out as noise edges. |
+| `is_conserved` | Boolean flag: true when total `attributed_delay` equals total `raw_wait` (Invariant I-1 holds). |
 
 ---
 
