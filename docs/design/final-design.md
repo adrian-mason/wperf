@@ -384,9 +384,22 @@ This is a **joint solution:** Dagre handles layout correctness, ECharts handles 
 
 Noise edges (< 50ms, typically 67% of all edges based on prototype data analysis) are rendered as barely-visible gray dashes, dramatically reducing visual clutter without hiding information.
 
+**Self-loop handling:** As established in [ADR-006](../decisions/ADR-006.md), Dagre hierarchical layout does not naturally support self-loops (A → A edges). The frontend must intercept self-loop edges and render them using custom loop-back arrows (Bézier curves) in ECharts to prevent rendering artifacts.
+
+**Data presentation constraints ([ADR-008](../decisions/ADR-008.md)):** When displaying the weight of a condensed Knot (SCC Super-node) in tooltips or detail panels, the UI **must not** label it as "Total Delay" or "Bottleneck Cost". It must be explicitly labeled as "Max Internal Wait" to reflect its nature as a sorting heuristic rather than an absolute temporal sum.
+
 ### 5.4 Inferno Flamegraph
 
 Stack traces collected via bpf_get_stackid are rendered as interactive SVG flamegraphs using the `inferno` crate. The flamegraph is embedded in the same HTML report, linked from the relevant graph node.
+
+### 5.5 Coverage & Health Dashboard
+
+To satisfy the transparency requirements of [ADR-012](../decisions/ADR-012.md) and the production sentinel of [ADR-007](../decisions/ADR-007.md), the HTML report **must** include a prominent health dashboard displaying:
+
+- **Algorithm health:** `is_conserved` boolean flag — a `false` value indicates a Cascade Engine bug and the results should not be trusted
+- **Data completeness metrics:** `drop_count`, `unmatched_wakeup_count`, `partial_stack_count`, `cascade_depth_truncation_count`, `false_wakeup_filtered_count`
+
+This ensures users can calibrate their confidence in the analysis based on empirical data quality, rather than relying on an unverifiable guarantee.
 
 ---
 
