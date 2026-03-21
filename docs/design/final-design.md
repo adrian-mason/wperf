@@ -421,7 +421,7 @@ This ensures users can calibrate their confidence in the analysis based on empir
 
 I-1 (weight conservation) is the single strongest correctness check — it catches 4 of 5 known bugs discovered during pseudocode review. Implementation: ~20 lines in `assert_weight_conserved()`.
 
-The proposed I-7 (locality) complements I-1 by catching path traversal errors where weight flows to non-adjacent nodes — a class of bug that I-1 alone cannot detect.
+Invariant I-7 (locality) complements I-1 by catching path traversal errors where weight flows to non-adjacent nodes — a class of bug that I-1 alone cannot detect. It must be enforced alongside I-1 through I-6.
 
 ### 6.3 Four Paper Scenarios
 
@@ -434,7 +434,7 @@ The proposed I-7 (locality) complements I-1 by catching path traversal errors wh
 
 ### 6.4 Differential Testing + Common-Mode Mitigation
 
-The Python reference implementation (bottleneck.py, ~808 lines from the original wPerf repository) serves as an oracle for differential testing. The same input graph is processed by both Rust and Python implementations; results must agree within ≤1.0ms tolerance (floating-point precision).
+The Python reference implementation (bottleneck.py, ~808 lines from the original wPerf repository) serves as an oracle for differential testing. The same synthetic input graph (constructed entirely in userspace without BPF dependencies, per the [ADR-011](../decisions/ADR-011.md) Phase 0 isolation constraint) is processed by both Rust and Python implementations; results must agree within ≤1.0ms tolerance (floating-point precision).
 
 **Common-mode failure risk:** Both implementations could share the same conceptual misunderstanding of the paper. Mitigation:
 - Cross-reference with the OSDI'18 paper's Figure 4 expected outputs (independent ground truth)
@@ -451,8 +451,18 @@ Key mutation targets: deletion of `path.insert`, modification of duration calcul
 
 **Tool:** virtme-ng (second-scale cross-kernel boot)
 - Extract vmlinuz + `/lib/modules/` from distro RPM/deb packages
-- Test kernels: 5.4 / 5.8 / 5.17 / 6.x (representing key BPF capability boundaries)
+- Test kernels: 4.18 (best-effort baseline) / 5.4 (recommended minimum) / 5.8 / 5.17 / 6.x (representing key BPF capability boundaries)
 - Each kernel version validates the feature probe → degradation → load path
+- Testing on 4.18 is strictly required to validate the feature degradation paths (perfarray fallback, `#pragma unroll` fallback, `raw_tp` fallback). Without it, the entire degradation architecture designed in ADR-002, ADR-004, and ADR-013 is unexercised dead code
+
+### 6.7 Performance Overhead Benchmarking
+
+To satisfy the overhead constraints in the Phase Exit Gates (§7.3), profiling overhead must be validated under automated, reproducible conditions:
+
+- **Workload:** `stress-ng --matrix 64` (or equivalent multi-threaded CPU/scheduler stressor) to generate >100K sched_switch events/sec
+- **Measurement:** `wperf record` process CPU utilization via `pidstat -p <pid> 1` over a 60-second collection window
+- **Thresholds:** < 3% single-core equivalent CPU usage for base collection (Phase 1 gate); < 5% with user-stack collection enabled (Phase 3 gate)
+- **Environment:** Same virtme-ng kernel matrix as §6.6; overhead must meet threshold on all test kernels
 
 ---
 
