@@ -317,7 +317,7 @@ pub struct WprfHeader {
     pub version: u8,                   // 1 (1B)
     pub endianness: u8,                // 1=LE (1B)
     pub host_arch: u8,                 // 0=x86_64, 1=aarch64 (1B)
-    pub meta_flags: u8,                // Reserved (1B)
+    pub _reserved: u8,                 // Formerly meta_flags, retained for 64B alignment (1B)
     pub data_section_end_offset: u64,  // Crash recovery offset (8B)
     pub section_table_offset: u64,     // Points to footer Section Table (8B)
     pub feature_bitmap: [u8; 32],      // 256-bit Feature Flags (32B)
@@ -342,7 +342,8 @@ Stream-friendly design — written at the end of the file:
 |-----------|---------|
 | 1 | String Table (thread names, cgroup names) |
 | 2 | Symbol Resolution Table |
-| 3 | Metadata (Build-ID, HOSTNAME, OSRELEASE, CLI_ARGS) |
+| 3 | Metadata (Build-ID, HOSTNAME, OSRELEASE, CLI_ARGS, DROP_COUNT) |
+| 4 | Attr Section (Collection config, sampling rates — P2 deferred) |
 
 ### 4.4 Crash Tolerance
 
