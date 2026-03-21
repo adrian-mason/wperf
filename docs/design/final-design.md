@@ -54,13 +54,16 @@ Using the libbpf ecosystem standard **probe → reconfigure → load** pattern, 
 
 | Feature | Probe Method | Degradation |
 |---------|-------------|-------------|
-| **ringbuf** | `bpf_map_create(BPF_MAP_TYPE_RINGBUF)` | Fall back to `PERF_EVENT_ARRAY` + `set_autocreate(heap, false)` |
-| **BTF (vmlinux)** | Check `/sys/kernel/btf/vmlinux` | Embedded BTF fallback; if still fails, hardcoded offsets |
+| **ringbuf** | `bpf_map_create(BPF_MAP_TYPE_RINGBUF)` | Reconfigure events map to `PERF_EVENT_ARRAY` (set key/value size) |
+| **tp_btf** | `probe_tp_btf("sched_switch")` | Fall back to `raw_tp/sched_switch`; disable `tp_btf` programs via `set_autoload(false)` |
+| **BTF (vmlinux)** | Check `/sys/kernel/btf/vmlinux` | Embedded BTF fallback; if still fails, refuse to run (`EOPNOTSUPP`) |
 | **bpf_loop** | `libbpf_probe_bpf_helper(TRACEPOINT, BPF_FUNC_loop)` | `#pragma unroll` bounded loops |
-| **cgroupv2** | Check `/sys/fs/cgroup/cgroup.controllers` | Disable cgroup filtering |
+| **cgroupv2** | Check `/sys/fs/cgroup/cgroup.controllers` | Disable cgroup filtering; `--cgroup` flag errors out |
 | **tracepoint** | Check `/sys/kernel/tracing/events/{cat}/{name}` | `bpf_program__set_autoload(prog, false)` |
 | **kprobe** | Blacklist + `available_filter_functions` | `set_autoload(false)` |
 | **fentry** | Actual attach test | Fall back to kprobe/tracepoint |
+
+When ringbuf **is** available, `set_autocreate(heap, false)` suppresses the unused percpu-array staging map. See [ADR-002-supplement](../decisions/ADR-002-supplement.md) and [ADR-004-supplement](../decisions/ADR-004-supplement.md) for empirical details.
 
 #### Struct Field Version Differences (BPF CO-RE)
 
@@ -105,17 +108,21 @@ This is resolved by the CO-RE compiler at load time with zero runtime overhead.
 
 #### Paper Alignment Table
 
-| Paper Probe | wPerf Probe | Category |
-|-------------|---------------|----------|
-| `sched_switch` | `tp/sched/sched_switch` | **Core** (mandatory) |
-| `sched_wakeup` | `tp/sched/sched_wakeup` | **Core** (mandatory) |
-| `sched_wakeup_new` | `tp/sched/sched_wakeup_new` | **Core** (thread creation) |
-| `sched_process_exit` | `tp/sched/sched_process_exit` | **Core** (cleanup) |
-| — | `tp/syscalls/sys_enter_futex` | **Auxiliary** (wait cause) |
-| — | `tp/block/block_rq_issue` + `block_rq_complete` | **Auxiliary** (IO attribution) |
-| — | `tp/irq/softirq_entry` + `softirq_exit` | **Auxiliary** (softirq attribution) |
+> Decision rationale: [ADR-013: Scheduler Probe Type](../decisions/ADR-013.md)
 
-Extensions beyond the paper (futex, block I/O, softirq) are gated by `const volatile bool` feature flags, allowing selective enable/disable at load time.
+Scheduler probes use `tp_btf` (BTF-enabled tracing, 5.5+) with `raw_tp` fallback (4.17+), not standard `tp/sched/`. This provides full `task_struct *` access for `tgid`, task flags, and cgroup traversal — fields absent from the standard tracepoint format struct. All libbpf-tools scheduler tools (offcputime, cpudist, runqslower, runqlat) use this pattern.
+
+| Paper Probe | wPerf Probe (Primary) | wPerf Probe (Fallback) | Category |
+|-------------|----------------------|----------------------|----------|
+| `sched_switch` | `tp_btf/sched_switch` | `raw_tp/sched_switch` | **Core** (mandatory) |
+| `sched_wakeup` | `tp_btf/sched_wakeup` | `raw_tp/sched_wakeup` | **Core** (mandatory) |
+| `sched_wakeup_new` | `tp_btf/sched_wakeup_new` | `raw_tp/sched_wakeup_new` | **Core** (thread creation) |
+| `sched_process_exit` | `tp_btf/sched_process_exit` | `raw_tp/sched_process_exit` | **Core** (cleanup) |
+| — | `tp/syscalls/sys_enter_futex` | — | **Auxiliary** (wait cause) |
+| — | `tp/block/block_rq_issue` + `block_rq_complete` | — | **Auxiliary** (IO attribution) |
+| — | `tp/irq/softirq_entry` + `softirq_exit` | — | **Auxiliary** (softirq attribution) |
+
+Non-scheduler probes (futex, block I/O, softirq) retain standard `tp/` — their trace event format structs provide all needed fields without `task_struct` traversal. Extensions beyond the paper are gated by `const volatile bool` feature flags, allowing selective enable/disable at load time.
 
 ### 2.2 Transport — Single-ELF CO-RE Dual-Mode
 
@@ -124,12 +131,14 @@ Extensions beyond the paper (futex, block I/O, softirq) are gated by `const vola
 A single BPF ELF object supports both ringbuf and perfarray transport, auto-detected at startup:
 
 ```
-open() → probe_ringbuf() → if yes: use ringbuf maps
-                          → if no:  set_type(PERF_EVENT_ARRAY) + set_autocreate(heap_map, false)
+open() → probe_ringbuf() → if yes: set_autocreate(heap, false); use ringbuf maps
+                          → if no:  set_type(events, PERF_EVENT_ARRAY); keep heap for staging
+       → probe_tp_btf()  → if yes: set_autoload(raw_tp progs, false)
+                          → if no:  set_autoload(tp_btf progs, false)
        → load() → attach()
 ```
 
-This avoids maintaining two separate BPF programs. The `EventTransport` trait in userspace abstracts the polling interface.
+This avoids maintaining two separate BPF programs. The `EventTransport` trait in userspace abstracts the polling interface. See [ADR-004-supplement](../decisions/ADR-004-supplement.md) for user-space implementation details.
 
 ### 2.3 Stack Unwinding — bpf_get_stackid + Elastic Stack Delta
 
