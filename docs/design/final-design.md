@@ -617,6 +617,10 @@ The prior design spec claimed "zero P0/P1 residual items." This was a design com
 | [ADR-010](../decisions/ADR-010.md) | Binary data format | Clean wPRF v1 with TLV + crash tolerance |
 | [ADR-011](../decisions/ADR-011.md) | Phase structure | 16-week gated phases |
 | [ADR-012](../decisions/ADR-012.md) | "No false negatives" | Explicit retraction, pragmatic assurance |
+| [ADR-013](../decisions/ADR-013.md) | Scheduler probe type | tp_btf + raw_tp fallback |
+| [ADR-014](../decisions/ADR-014.md) | libbpf/CO-RE best practices | Nakryiko reference alignment |
+| [ADR-002-supplement](../decisions/ADR-002-supplement.md) | Kernel compat empirical data | libbpf-tools code analysis |
+| [ADR-004-supplement](../decisions/ADR-004-supplement.md) | Transport user-space details | Dual-mode polling lifecycle |
 
 ### B. Changes from Prior Design
 
@@ -627,10 +631,10 @@ The prior design spec claimed "zero P0/P1 residual items." This was a design com
 | Phase 2 structure | Monolithic | **Split into 2a/2b** | Isolate graph topology changes (2b) from annotation-only changes (2a) |
 | Phase 1 visualization | None | **Minimal SVG** | Avoid "can't distinguish algorithm bug from rendering bug" |
 | Gate 0 prototypes | None | **3 prototypes** | Validate high-risk assumptions before committing to implementation |
-| Additional risks | 3 risks | **7 risks** | 4 omissions identified by pre-execution audit |
+| Additional risks | 3 risks | **8 risks** | 5 omissions identified by pre-execution audit and cross-ADR review |
 | Decision rationale | Mixed into body | **Separate ADR files** | Clean separation of "what" from "why" |
 | "No false negatives" | Silently disappeared | **Explicit disposition** | Honest characterization of coverage guarantees |
-| I-7 invariant | Not present | **Proposed** | Catches path traversal errors (BUG-1 class) that I-1 alone misses |
+| I-7 invariant | Not present | **Adopted** | Catches path traversal errors (BUG-1 class) that I-1 alone misses |
 
 ### C. Archived Project Failure Patterns
 
@@ -648,3 +652,12 @@ Quantified evidence from the archived Rust implementation (462 commits, Feb 2024
 | **Fix ratio** | 198/462 commits (42.8%) were fixes; fix-to-feature ratio 1.51 |
 
 These patterns directly inform the three prohibitions in § 7.4 and the gated phase structure in § 7.2.
+
+### D. External References
+
+| Resource | Relevance |
+|----------|-----------|
+| [OSDI'18 wPerf Paper](https://www.usenix.org/conference/osdi18/presentation/yu) | Authoritative algorithm specification (Cascade, Knot, WFG) |
+| [Nakryiko Blog (nakryiko.com)](https://nakryiko.com/) | libbpf maintainer's CO-RE, ringbuf, and portability best practices (ADR-014) |
+| [bcc/libbpf-tools](https://github.com/iovisor/bcc/tree/master/libbpf-tools) | Production reference for compat.bpf.h, core_fixes.bpf.h, cgroup filtering (ADR-002-supplement) |
+| [Elastic eBPF Profiler](https://github.com/elastic/otel-profiling-agent) | Stack Delta deep unwinding reference implementation (ADR-005) |
