@@ -1,0 +1,14 @@
+[package]
+name = "ebpf-proto"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+libbpf-rs = "0.24"
+libc = "0.2"
+plain = "0.2"
+nix = { version = "0.29", features = ["signal", "sched"] }
+
+[build-dependencies]
+libbpf-cargo = "0.24"

@@ -1,0 +1,2 @@
+cargo:rerun-if-changed=src/bpf/probe.bpf.c
+cargo:rerun-if-changed=src/bpf/vmlinux.h
