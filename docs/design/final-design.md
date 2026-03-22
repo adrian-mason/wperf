@@ -538,9 +538,9 @@ Phase 3 (Stack Collection + Production HTML)    Weeks 13–16
 
 ### 8.1 Risk 1: Cascade Engine Complexity — HIGH
 
-The Cascade Engine has no third-party production implementation worldwide (the only reference is the original Python prototype, ~51 GitHub stars). Three rounds of pseudocode review found 5 bugs before any code existed. The `sweep_line_partition()` function still lacks pseudocode. The verification strategy document remains in draft status.
+The Cascade Engine has no third-party production implementation worldwide (the only reference is the original Python prototype, ~51 GitHub stars). Three rounds of pseudocode review found 5 bugs before any code existed. The `sweep_line_partition()` function still lacks pseudocode. While the verification strategy (§6) is now codified, its effectiveness in a production Rust implementation remains unproven.
 
-**Mitigation:** Five-layer verification pyramid (§ 6.1); Phase 0 dedicated to algorithm correctness with 3-week timeline; petgraph handles SCC/condensation (3.6K stars, mature library).
+**Mitigation:** Five-layer verification pyramid (§6.1); Phase 0 dedicated to algorithm correctness with 3-week timeline; petgraph handles SCC/condensation (3.6K stars, mature library).
 
 ### 8.2 Risk 2: MVP Scope — HIGH
 
@@ -550,9 +550,9 @@ The full 7-step pipeline + 6 probe types + wPRF format + Dagre+ECharts UI is amb
 
 ### 8.3 Risk 3: Minimum Kernel Version — MEDIUM
 
-Supporting kernel 4.18 (RHEL 8.0) doubles engineering complexity due to the 4,096 BPF instruction limit, lack of `bpf_probe_read_kernel()`, and absent BTF/CO-RE.
+Supporting kernel 4.18 (RHEL 8.0) doubles engineering complexity due to the 4,096 BPF instruction limit, lack of `bpf_probe_read_kernel()`, and absent BTF/CO-RE. Per [ADR-002-supplement](../decisions/ADR-002-supplement.md), native 4.18 kernels (RHEL 8.0-8.1) lack BTF entirely — without implementing the embedded BTF (`min_core_btfs`) pattern, the tool will refuse to run (`EOPNOTSUPP`) on these kernels despite other feature degradations being available.
 
-**Mitigation:** 5.4 recommended; 4.18 best-effort via dynamic feature probing; explicit degradation matrix documents what works on each kernel.
+**Mitigation:** 5.4 recommended minimum (BTF available in all major distributions); 4.18 best-effort requires a Phase 1 scope decision on whether to ship embedded BTF or accept BTF as a hard requirement; explicit degradation matrix documents what works on each kernel.
 
 ### 8.4 Risk 4: AI-Generated Spec Blind Spots — MEDIUM
 
@@ -580,13 +580,19 @@ The prior design spec claimed "zero P0/P1 residual items." This was a design com
 
 **Mitigation:** Gate 0 + phase gates convert paper claims into empirical validation at each milestone.
 
-### 8.8 P2 Deferred Items
+### 8.8 Risk 8: Clock Skew & Timestamp Non-monotonicity — MEDIUM
+
+`bpf_ktime_get_ns()` uses `ktime_get_mono_fast_ns()`, which the kernel documentation explicitly states is "not guaranteed to be monotonic across an update" during NTP/PTP clock slope adjustments. Timestamp inversions can cause the event correlation state machine to mismatch sched_switch and sched_wakeup events, producing incorrect `raw_wait` edges or O(N²) reorder buffer churn.
+
+**Mitigation:** 50μs false-wakeup filter absorbs micro-inversions (NTP-induced skew is typically nanosecond-to-low-microsecond on modern x86 with `constant_tsc` + `nonstop_tsc`); `unmatched_wakeup_count` metric quantifies correlation failures; ringbuf path provides global ordering that eliminates cross-CPU timestamp issues; perfarray path's Min-Heap Reorder Buffer (50ms window) tolerates larger inversions.
+
+### 8.9 P2 Deferred Items
 
 | Item | Status | Disposition |
 |------|--------|-------------|
-| **wPerf-origin git history review** | Deferred since early reviews, never executed | **Promote to pre-Phase 0** — archived project's failure patterns are critical design input |
+| **wPerf-origin git history review** | Deferred since early reviews, never executed | **Mandatory pre-Phase 0 prerequisite** — archived project's failure patterns are critical design input |
 | Synthetic edge weight calculation details | P2 | Complete before Phase 2b |
-| Attr Section + Header byte layout | P2 | Complete before Phase 1 W1 |
+| Attr Section + Header byte layout | Design codified (Section ID 4 reserved in §4.3), implementation P2 | Complete before Phase 1 W1 |
 | User-space annotation (#11) | V1 (futex only) | Phase 4+ — does not block v0.1.0-alpha |
 | CI simplification (#6) | V0 (never discussed) | Phase 0-1: `cargo test` only; Phase 2+: define minimal CI |
 | cgroupv1 cgroup_id alternative | P3 | Handle when cgroupv2 probe fails |
