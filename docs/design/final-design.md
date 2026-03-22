@@ -491,7 +491,7 @@ Gate 0 (Prototype Validation)                  Week 1
 Phase 0 (Cascade Correctness)                  Weeks 2–4
 ├── W1: Core implementation + I-1~I-7 + Figure 4 tests
 ├── W2: proptest 10K graphs + 5 bug regressions + SCC/Condensation
-└── W3: Differential vs Python + mutation testing + state machine
+└── W3: Differential vs Python + mutation testing
 
 Phase 1 (Minimal Data Pipeline)                Weeks 5–8
 ├── W1: wperf record (BPF probes + .wperf format)
@@ -506,7 +506,7 @@ Phase 2b (Synthetic Edges + Attribution)        Weeks 11–12
 └── block_rq + softirq pseudo-threads (changes graph topology)
 
 Phase 3 (Stack Collection + Production HTML)    Weeks 13–16
-├── W1-2: bpf_get_stackid + symbol resolution (blazesym)
+├── W1-2: bpf_get_stackid + Elastic Stack Delta porting + symbol resolution (blazesym)
 ├── W3: Dagre + ECharts HTML report
 └── W4: Flamegraph + cross-kernel testing
 ```
@@ -517,7 +517,7 @@ Phase 3 (Stack Collection + Production HTML)    Weeks 13–16
 |------|-------------------|--------|
 | **Gate 0** | A: matched switch/wakeup pairs; B: Figure 4 exact match; C: 10-event roundtrip + truncation recovery | Manual |
 | **Phase 0** | `assert_weight_conserved()` 0 violations; 5 bug regressions pass; proptest 10K, 0 violations; vs Python ≤1.0ms; mutation ≥90% | **Automated** |
-| **Phase 1** | 2-thread mutex Knot detected; `is_conserved==true` on real BPF data; overhead <3% CPU (stress-ng 64 threads); crash recovery passes; minimal SVG readable | Automated + manual review |
+| **Phase 1** | 2-thread mutex Knot detected; `is_conserved==true` on real BPF data; all 5 coverage metrics exported in JSON; overhead <3% CPU (stress-ng 64 threads); crash recovery passes; minimal SVG readable | Automated + manual review |
 | **Phase 2a** | Correct futex wait_type annotation; spurious wakeups filtered; `is_conserved` preserved | Automated |
 | **Phase 2b** | IO pseudo-thread `attributed_delay ≥ 70%`; no spurious Knots from synthetic edges; `is_conserved` preserved | Automated + manual review |
 | **Phase 3** | Stack depth ≥ 5 frames (with FP); Dagre layout renders; flamegraph functions readable; total overhead < 5% CPU | Automated + manual |
