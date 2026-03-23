@@ -288,3 +288,40 @@ All core probes (sched_switch, sched_wakeup, sched_process_fork, sched_process_e
 4. **The state machine in Analyzer.java is the closest reference for wPerf's Step 1.** The `directBreakdown()` function (lines 558-702) implements the same sched_switch/sched_wakeup correlation that wPerf's event correlation state machine must replicate.
 
 5. **Pseudo-thread IDs use negative integers.** The convention (-4=NIC, -5=Disk, -16=SoftIRQ) maps directly to wPerf's named pseudo-thread design, but wPerf uses string-typed identifiers (`block_device:<dev>`) rather than hardcoded negative numbers.
+
+## 11. Edge Aggregation vs Cascade Redistribution
+
+The most important conceptual distinction for Phase 0:
+
+**Edge aggregation (what Analyzer.java Worker op=3 does):**
+```
+A waits for B: [0, 50ms]
+B waits for C: [20, 50ms] (overlapping)
+→ Output: A→B = 50ms, B→C = 30ms
+→ B appears to be the biggest bottleneck (50ms points at it)
+```
+
+**Cascade redistribution (what ADR-007 designs):**
+```
+Same input, but cascade traverses B's outgoing edges:
+  B was waiting for C during [20, 50ms] — that's C's fault, not B's
+→ Output: B attributed = 20ms, C attributed = 30ms
+→ C is identified as the root cause
+```
+
+This is the fundamental reason wPerf finds **global bottlenecks** while standard off-CPU profilers only see **local longest waits**. The raw aggregation approach cannot distinguish between a thread that is genuinely slow (root cause) and one that is merely waiting for someone else (victim).
+
+Since no production cascade implementation exists in wPerf-origin, the Rust implementation in Phase 0 will be the **world's first production cascade with formal verification** (7 invariants, 10K random graph proptest, mutation testing).
+
+## 12. Additional Valuable Patterns from wPerf-origin
+
+| Pattern | Location | Value for wPerf |
+|---------|----------|----------------|
+| `isFakeWake()` DPEvent state machine | Analyzer.java:808-895 | More sophisticated than our 50μs threshold — uses segment chain traversal to detect if woken thread immediately sleeps again. Worth studying for Phase 2a. |
+| Network bandwidth model | short.py:4-5 (125 MB/s hardcoded) | Anti-pattern — wPerf correctly uses tracepoint-based attribution instead of hardcoded bandwidth constants. |
+| Thread grouping by stack similarity | short.py (Jaccard distance) | Useful for Phase 3 thread pool collapse — when multiple threads in a pool have identical stacks, group them into a single logical node. |
+| 32-worker parallelism for segment building | Analyzer.java Worker threads | Use Rayon in Phase 0/1 for parallel per-thread segment construction. |
+| UDS (User-Defined Spinlock) annotation | Analyzer.java:29, 63-66 | Maps to deferred "User-space annotation (#11)" in §8.9 P2 items. |
+| Per-CPU softirq tracking via irq field | ioctl_perf.c `fang_result.irq` | Exact mechanism ADR-009 describes — when `irq != 0` in sched_wakeup, the waker is a subsystem, not a thread. |
+| `removeFakeWakeup()` commented out | Analyzer.java:510-556 | Suggests the original authors struggled with false wakeup detection — multiple implementations attempted and abandoned. |
+| Dual timestamp (TSC + perfclock) | ioctl_perf.c `fang_result.ts` + `.perfts` | wPerf uses only `bpf_ktime_get_ns()` — simpler but loses cross-correlation with perf.data. Not needed for v1. |
