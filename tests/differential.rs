@@ -108,11 +108,7 @@ fn run_python_oracle(input: &OracleInput) -> OracleOutput {
     serde_json::from_slice(&output.stdout).expect("failed to parse Python output")
 }
 
-fn compare_results(
-    rust_graph: &WaitForGraph,
-    python: &OracleOutput,
-    test_name: &str,
-) {
+fn compare_results(rust_graph: &WaitForGraph, python: &OracleOutput, test_name: &str) {
     let rust_edges = rust_graph.all_edges();
     assert_eq!(
         rust_edges.len(),

@@ -6,9 +6,9 @@
 
 use std::collections::BTreeMap;
 
+use petgraph::Direction;
 use petgraph::algo::tarjan_scc;
 use petgraph::graph::{DiGraph, NodeIndex};
-use petgraph::Direction;
 use serde::Serialize;
 
 use crate::graph::types::*;
@@ -70,9 +70,7 @@ impl CondensationDag {
 
     /// Out-degree of a super-node in the condensation DAG.
     pub fn out_degree(&self, idx: NodeIndex) -> usize {
-        self.dag
-            .edges_directed(idx, Direction::Outgoing)
-            .count()
+        self.dag.edges_directed(idx, Direction::Outgoing).count()
     }
 
     /// Sink super-nodes (out_degree == 0).
@@ -146,8 +144,7 @@ pub fn internal_edges<'a>(
     graph: &'a WaitForGraph,
     scc: &Scc,
 ) -> Vec<(ThreadId, ThreadId, &'a EdgeWeight)> {
-    let members: std::collections::BTreeSet<ThreadId> =
-        scc.members.iter().copied().collect();
+    let members: std::collections::BTreeSet<ThreadId> = scc.members.iter().copied().collect();
 
     graph
         .all_edges()

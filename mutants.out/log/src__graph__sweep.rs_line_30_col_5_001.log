@@ -1,0 +1,179 @@
+
+*** src/graph/sweep.rs:30:5: replace sweep_line_partition -> Vec<ElementaryInterval> with vec![Default::default()]
+
+*** mutation diff:
+--- src/graph/sweep.rs
++++ replace sweep_line_partition -> Vec<ElementaryInterval> with vec![Default::default()]
+@@ -22,73 +22,17 @@
+ ///    ElementaryInterval listing active targets
+ ///
+ /// Returns empty Vec if no outgoing edges overlap `window`.
+ pub fn sweep_line_partition(
+     graph: &WaitForGraph,
+     node: ThreadId,
+     window: &TimeWindow,
+ ) -> Vec<ElementaryInterval> {
+-    let node_idx = match graph.node_index(&node) {
+-        Some(idx) => idx,
+-        None => return Vec::new(),
+-    };
+-
+-    // Collect clipped intervals: (clipped_window, target_tid)
+-    let mut clipped: Vec<(TimeWindow, ThreadId)> = Vec::new();
+-    for edge_ref in graph.graph.edges_directed(node_idx, Direction::Outgoing) {
+-        let ew = edge_ref.weight();
+-        if let Some(overlap) = window.overlap(&ew.time_window) {
+-            let target_tid = graph.graph[edge_ref.target()].tid;
+-            clipped.push((overlap, target_tid));
+-        }
+-    }
+-
+-    if clipped.is_empty() {
+-        return Vec::new();
+-    }
+-
+-    // Collect all distinct boundary points
+-    let mut points = BTreeSet::new();
+-    for (w, _) in &clipped {
+-        points.insert(w.start_ms);
+-        points.insert(w.end_ms);
+-    }
+-    let points: Vec<u64> = points.into_iter().collect(); // already sorted (BTreeSet)
+-
+-    // Sweep: for each consecutive pair, find active targets
+-    let mut result = Vec::new();
+-    for pair in points.windows(2) {
+-        let (s, e) = (pair[0], pair[1]);
+-        if s >= e {
+-            continue;
+-        }
+-        let sub = TimeWindow::new(s, e);
+-
+-        // Targets active during this sub-interval
+-        let mut targets: Vec<ThreadId> = clipped
+-            .iter()
+-            .filter(|(w, _)| w.start_ms <= s && w.end_ms >= e)
+-            .map(|(_, tid)| *tid)
+-            .collect();
+-
+-        if targets.is_empty() {
+-            continue;
+-        }
+-
+-        targets.sort(); // deterministic order
+-        targets.dedup();
+-
+-        result.push(ElementaryInterval {
+-            window: sub,
+-            targets,
+-        });
+-    }
+-
+-    result
++    vec![Default::default()] /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+     use crate::graph::types::NodeKind;
+ 
+     fn make_graph_with_outgoing(
+
+
+*** /home/maverick/.rustup/toolchains/1.94-x86_64-unknown-linux-gnu/bin/cargo test --no-run --verbose --package=wperf@0.1.0
+       Fresh libc v0.2.183
+       Fresh cfg-if v1.0.4
+       Fresh unicode-ident v1.0.24
+       Fresh hashbrown v0.16.1
+       Fresh autocfg v1.5.0
+       Fresh equivalent v1.0.2
+       Fresh foldhash v0.1.5
+       Fresh linux-raw-sys v0.12.1
+       Fresh bitflags v2.11.0
+       Fresh itoa v1.0.18
+       Fresh fastrand v2.3.0
+       Fresh once_cell v1.21.4
+       Fresh memchr v2.8.0
+       Fresh fixedbitset v0.5.7
+       Fresh wait-timeout v0.2.1
+       Fresh fnv v1.0.7
+       Fresh quick-error v1.2.3
+       Fresh bit-vec v0.8.0
+       Fresh unarray v0.1.4
+       Fresh regex-syntax v0.8.10
+       Fresh hashbrown v0.15.5
+       Fresh indexmap v2.13.0
+       Fresh bit-set v0.8.0
+       Fresh proc-macro2 v1.0.106
+       Fresh getrandom v0.3.4
+       Fresh serde_core v1.0.228
+       Fresh rustix v1.1.4
+       Fresh zerocopy v0.8.47
+       Fresh getrandom v0.4.2
+       Fresh zmij v1.0.21
+       Fresh petgraph v0.8.3
+       Fresh quote v1.0.45
+       Fresh rand_core v0.9.5
+       Fresh tempfile v3.27.0
+       Fresh ppv-lite86 v0.2.21
+       Fresh serde_json v1.0.149
+       Fresh num-traits v0.2.19
+       Fresh syn v2.0.117
+       Fresh rand v0.9.2
+       Fresh rusty-fork v0.3.1
+       Fresh rand_chacha v0.9.0
+       Fresh rand_xorshift v0.4.0
+       Fresh serde_derive v1.0.228
+       Fresh proptest v1.11.0
+       Fresh serde v1.0.228
+       Dirty wperf v0.1.0 (/tmp/cargo-mutants-phase0-3YNLf4.tmp): the file `src/graph/sweep.rs` has changed (1774690368.936384379s, 525483594ns after last build at 1774690368.410900785s)
+   Compiling wperf v0.1.0 (/tmp/cargo-mutants-phase0-3YNLf4.tmp)
+     Running `/home/maverick/.rustup/toolchains/1.94-x86_64-unknown-linux-gnu/bin/rustc --crate-name wperf --edition=2024 src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=b336c738ac6331ae -C extra-filename=-3eb8c1cfaa96dc7b --out-dir /tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps -C linker=clang -C incremental=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/incremental -L dependency=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps --extern petgraph=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libpetgraph-4acf2b925821119a.rlib --extern proptest=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libproptest-cf23810614906ad5.rlib --extern serde=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde-3a4ab966af36b62f.rlib --extern serde_json=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde_json-b75ff9ddc7ba4b13.rlib -C link-arg=-fuse-ld=/usr/bin/mold`
+     Running `/home/maverick/.rustup/toolchains/1.94-x86_64-unknown-linux-gnu/bin/rustc --crate-name wperf --edition=2024 src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C debuginfo=2 --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=63bedfa4aa42468d -C extra-filename=-9b008d9ff48e6c45 --out-dir /tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps -C linker=clang -C incremental=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/incremental -L dependency=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps --extern petgraph=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libpetgraph-4acf2b925821119a.rmeta --extern serde=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde-3a4ab966af36b62f.rmeta --extern serde_json=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde_json-b75ff9ddc7ba4b13.rmeta -C link-arg=-fuse-ld=/usr/bin/mold`
+warning: unused import: `std::collections::BTreeSet`
+ --> src/graph/sweep.rs:7:5
+  |
+7 | use std::collections::BTreeSet;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `petgraph::visit::EdgeRef`
+  --> src/graph/sweep.rs:12:5
+   |
+12 | use petgraph::visit::EdgeRef;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `petgraph::Direction`
+  --> src/graph/sweep.rs:13:5
+   |
+13 | use petgraph::Direction;
+   |     ^^^^^^^^^^^^^^^^^^^
+
+error[E0277]: the trait bound `types::ElementaryInterval: Default` is not satisfied
+   --> src/graph/sweep.rs:30:10
+    |
+ 30 |     vec![Default::default()] /* ~ changed by cargo-mutants ~ */
+    |          ^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+help: the trait `Default` is not implemented for `types::ElementaryInterval`
+   --> src/graph/types.rs:100:1
+    |
+100 | pub struct ElementaryInterval {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For more information about this error, try `rustc --explain E0277`.
+warning: `wperf` (lib) generated 3 warnings
+error: could not compile `wperf` (lib) due to 1 previous error; 3 warnings emitted
+
+Caused by:
+  process didn't exit successfully: `/home/maverick/.rustup/toolchains/1.94-x86_64-unknown-linux-gnu/bin/rustc --crate-name wperf --edition=2024 src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C debuginfo=2 --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=63bedfa4aa42468d -C extra-filename=-9b008d9ff48e6c45 --out-dir /tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps -C linker=clang -C incremental=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/incremental -L dependency=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps --extern petgraph=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libpetgraph-4acf2b925821119a.rmeta --extern serde=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde-3a4ab966af36b62f.rmeta --extern serde_json=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde_json-b75ff9ddc7ba4b13.rmeta -C link-arg=-fuse-ld=/usr/bin/mold` (exit status: 1)
+warning: build failed, waiting for other jobs to finish...
+warning: `wperf` (lib test) generated 3 warnings (3 duplicates)
+error: could not compile `wperf` (lib test) due to 1 previous error; 3 warnings emitted
+
+Caused by:
+  process didn't exit successfully: `/home/maverick/.rustup/toolchains/1.94-x86_64-unknown-linux-gnu/bin/rustc --crate-name wperf --edition=2024 src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=b336c738ac6331ae -C extra-filename=-3eb8c1cfaa96dc7b --out-dir /tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps -C linker=clang -C incremental=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/incremental -L dependency=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps --extern petgraph=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libpetgraph-4acf2b925821119a.rlib --extern proptest=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libproptest-cf23810614906ad5.rlib --extern serde=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde-3a4ab966af36b62f.rlib --extern serde_json=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde_json-b75ff9ddc7ba4b13.rlib -C link-arg=-fuse-ld=/usr/bin/mold` (exit status: 1)
+
+*** result: Failure(101)

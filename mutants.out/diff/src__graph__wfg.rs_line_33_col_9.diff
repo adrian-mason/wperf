@@ -1,0 +1,26 @@
+--- src/graph/wfg.rs
++++ replace WaitForGraph::add_node -> NodeIndex with Default::default()
+@@ -25,22 +25,17 @@
+             graph: DiGraph::new(),
+             node_map: BTreeMap::new(),
+         }
+     }
+ 
+     /// Add a node (thread). Returns the NodeIndex. Idempotent — returns
+     /// existing index if tid already present.
+     pub fn add_node(&mut self, tid: ThreadId, kind: NodeKind) -> NodeIndex {
+-        if let Some(&idx) = self.node_map.get(&tid) {
+-            return idx;
+-        }
+-        let idx = self.graph.add_node(NodeWeight { tid, kind });
+-        self.node_map.insert(tid, idx);
+-        idx
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Add a directed edge: `src` waits for `dst` during `window`.
+     pub fn add_edge(&mut self, src: ThreadId, dst: ThreadId, window: TimeWindow) -> EdgeIndex {
+         let src_idx = *self.node_map.get(&src).expect("src node not in graph");
+         let dst_idx = *self.node_map.get(&dst).expect("dst node not in graph");
+         self.graph.add_edge(src_idx, dst_idx, EdgeWeight::new(window))
+     }

@@ -23,10 +23,7 @@ pub struct Knot {
 /// 1. Exclude |SCC| == 1 with no self-loop (trivial sinks)
 /// 2. Exclude pure kernel-thread SCCs (kworker, ksoftirqd, etc.)
 /// 3. Remaining sinks with at least 1 userspace thread are Knots
-pub fn detect_knots(
-    cdag: &CondensationDag,
-    graph: &WaitForGraph,
-) -> Vec<Knot> {
+pub fn detect_knots(cdag: &CondensationDag, graph: &WaitForGraph) -> Vec<Knot> {
     cdag.sinks()
         .into_iter()
         .filter(|&idx| {
@@ -66,10 +63,7 @@ fn has_self_loop(graph: &WaitForGraph, tid: &ThreadId) -> bool {
 fn is_pure_kernel_scc(graph: &WaitForGraph, members: &[ThreadId]) -> bool {
     members.iter().all(|tid| {
         let idx = graph.node_index(tid).unwrap();
-        matches!(
-            graph.node_weight(idx).kind,
-            NodeKind::KernelThread
-        )
+        matches!(graph.node_weight(idx).kind, NodeKind::KernelThread)
     })
 }
 

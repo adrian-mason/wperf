@@ -1,0 +1,21 @@
+--- src/cascade/engine.rs
++++ replace + with - in compute_cascade
+@@ -101,17 +101,17 @@
+     path.insert(current);
+     let mut total_propagated: u64 = 0;
+ 
+     for interval in &intervals {
+         let target_count = interval.targets.len() as u64;
+ 
+         for &next_node in &interval.targets {
+             let _prop_down = compute_cascade(
+-                graph, next_node, &interval.window, depth + 1, max_depth, path,
++                graph, next_node, &interval.window, depth - /* ~ changed by cargo-mutants ~ */ 1, max_depth, path,
+             );
+ 
+             // NEW-BUG-1 FIX: child absorbs interval duration (prop_down + self_blame)
+             let child_subtree_absorbed = interval.window.duration();
+ 
+             let external_waiters = count_concurrent_waiters(graph, next_node, &interval.window);
+             let scale_target = target_count.max(1);
+             let scale_external = external_waiters.max(1);

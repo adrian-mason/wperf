@@ -1,0 +1,21 @@
+--- src/graph/wfg.rs
++++ replace WaitForGraph::node_count -> usize with 0
+@@ -84,17 +84,17 @@
+             .collect();
+         // Sort by (src_tid, dst_tid) for determinism
+         result.sort_by_key(|(_, s, d, _)| (*s, *d));
+         result
+     }
+ 
+     /// Total number of nodes.
+     pub fn node_count(&self) -> usize {
+-        self.graph.node_count()
++        0 /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Total number of edges.
+     pub fn edge_count(&self) -> usize {
+         self.graph.edge_count()
+     }
+ 
+     /// Get edge weight by index.

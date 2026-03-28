@@ -1,0 +1,21 @@
+--- src/graph/wfg.rs
++++ replace WaitForGraph::node_weight -> &NodeWeight with Box::leak(Box::new(Default::default()))
+@@ -104,17 +104,17 @@
+ 
+     /// Get mutable edge weight by index.
+     pub fn edge_weight_mut(&mut self, idx: EdgeIndex) -> &mut EdgeWeight {
+         &mut self.graph[idx]
+     }
+ 
+     /// Get node weight by index.
+     pub fn node_weight(&self, idx: NodeIndex) -> &NodeWeight {
+-        &self.graph[idx]
++        Box::leak(Box::new(Default::default())) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// All node indices, sorted by ThreadId for determinism.
+     pub fn node_indices(&self) -> Vec<NodeIndex> {
+         self.node_map.values().copied().collect()
+     }
+ 
+     /// Clone the graph structure with the same topology but reset

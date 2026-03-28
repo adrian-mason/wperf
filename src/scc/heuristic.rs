@@ -7,7 +7,7 @@
 
 use crate::graph::wfg::WaitForGraph;
 
-use super::tarjan::{internal_edges, CondensationDag, Scc};
+use super::tarjan::{CondensationDag, Scc, internal_edges};
 
 /// Compute MAX heuristic weight for an SCC.
 /// Returns the maximum attributed_delay_ms among all internal edges.

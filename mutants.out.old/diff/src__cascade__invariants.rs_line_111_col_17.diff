@@ -1,0 +1,21 @@
+--- src/cascade/invariants.rs
++++ replace != with == in check_idempotency
+@@ -103,17 +103,17 @@
+ 
+     let first = cascade_engine(graph, Some(max_depth));
+     let second = cascade_engine(&first, Some(max_depth));
+ 
+     // Compare all attributed_delay_ms values
+     let e1 = first.all_edges();
+     let e2 = second.all_edges();
+ 
+-    if e1.len() != e2.len() {
++    if e1.len() == /* ~ changed by cargo-mutants ~ */ e2.len() {
+         return false;
+     }
+ 
+     e1.iter()
+         .zip(e2.iter())
+         .all(|(a, b)| a.3.attributed_delay_ms == b.3.attributed_delay_ms)
+ }
+ 

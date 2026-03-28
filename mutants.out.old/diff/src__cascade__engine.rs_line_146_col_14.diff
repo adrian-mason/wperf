@@ -1,0 +1,21 @@
+--- src/cascade/engine.rs
++++ replace == with != in count_concurrent_waiters
+@@ -138,17 +138,17 @@
+     let count = graph
+         .incoming_edges(node_idx)
+         .iter()
+         .filter(|(_, _, ew)| ew.time_window.overlap(window).is_some())
+         .map(|(_, src_tid, _)| *src_tid)
+         .collect::<BTreeSet<_>>()
+         .len();
+ 
+-    if count == 0 { 1 } else { count as u64 }
++    if count != /* ~ changed by cargo-mutants ~ */ 0 { 1 } else { count as u64 }
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+     use crate::graph::types::NodeKind;
+ 
+     fn figure4_graph() -> WaitForGraph {

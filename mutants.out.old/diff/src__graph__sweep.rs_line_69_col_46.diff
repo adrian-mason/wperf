@@ -1,0 +1,21 @@
+--- src/graph/sweep.rs
++++ replace && with || in sweep_line_partition
+@@ -61,17 +61,17 @@
+         if s >= e {
+             continue;
+         }
+         let sub = TimeWindow::new(s, e);
+ 
+         // Targets active during this sub-interval
+         let mut targets: Vec<ThreadId> = clipped
+             .iter()
+-            .filter(|(w, _)| w.start_ms <= s && w.end_ms >= e)
++            .filter(|(w, _)| w.start_ms <= s || /* ~ changed by cargo-mutants ~ */ w.end_ms >= e)
+             .map(|(_, tid)| *tid)
+             .collect();
+ 
+         if targets.is_empty() {
+             continue;
+         }
+ 
+         targets.sort(); // deterministic order

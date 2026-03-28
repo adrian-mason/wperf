@@ -1,0 +1,24 @@
+--- src/graph/wfg.rs
++++ replace WaitForGraph::outgoing_edges -> Vec<(EdgeIndex, ThreadId, &EdgeWeight)> with vec![(Default::default(), Default::default(), Box::leak(Box::new(Default::default())))]
+@@ -52,20 +52,17 @@
+ 
+     /// Get NodeIndex for a ThreadId.
+     pub fn node_index(&self, tid: &ThreadId) -> Option<NodeIndex> {
+         self.node_map.get(tid).copied()
+     }
+ 
+     /// Get all outgoing edges from `node` as (EdgeIndex, dst_ThreadId, &EdgeWeight).
+     pub fn outgoing_edges(&self, node: NodeIndex) -> Vec<(EdgeIndex, ThreadId, &EdgeWeight)> {
+-        self.graph
+-            .edges_directed(node, Direction::Outgoing)
+-            .map(|e| (e.id(), self.graph[e.target()].tid, e.weight()))
+-            .collect()
++        vec![(Default::default(), Default::default(), Box::leak(Box::new(Default::default())))] /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Get all incoming edges to `node`.
+     pub fn incoming_edges(&self, node: NodeIndex) -> Vec<(EdgeIndex, ThreadId, &EdgeWeight)> {
+         self.graph
+             .edges_directed(node, Direction::Incoming)
+             .map(|e| (e.id(), self.graph[e.source()].tid, e.weight()))
+             .collect()

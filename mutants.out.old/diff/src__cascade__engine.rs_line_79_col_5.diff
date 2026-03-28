@@ -1,0 +1,21 @@
+--- src/cascade/engine.rs
++++ replace is_conserved -> bool with true
+@@ -71,17 +71,17 @@
+     );
+ 
+     result
+ }
+ 
+ /// Check if the cascade result is conserved (non-panicking).
+ /// Delegates to invariants::is_conserved (I-2 + I-7).
+ pub fn is_conserved(original: &WaitForGraph, result: &WaitForGraph) -> bool {
+-    invariants::is_conserved(original, result)
++    true /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Recursive cascade computation (ADR-007 pseudocode).
+ /// Returns total weight propagated to deeper nodes.
+ fn compute_cascade(
+     graph: &WaitForGraph,
+     current: ThreadId,
+     window: &TimeWindow,

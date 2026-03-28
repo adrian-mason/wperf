@@ -33,10 +33,7 @@ pub fn assert_weight_conserved(original: &WaitForGraph, result: &WaitForGraph) -
                 i2, i7
             );
         } else {
-            eprintln!(
-                "[wperf] WARNING: I-1 violation (I-2={}, I-7={})",
-                i2, i7
-            );
+            eprintln!("[wperf] WARNING: I-1 violation (I-2={}, I-7={})", i2, i7);
         }
     }
 
@@ -62,8 +59,7 @@ pub fn check_non_negativity(_result: &WaitForGraph) -> bool {
 /// Cascade must not create or remove nodes/edges.
 /// The topology of the result must match the original.
 pub fn check_termination(original: &WaitForGraph, result: &WaitForGraph) -> bool {
-    original.node_count() == result.node_count()
-        && original.edge_count() == result.edge_count()
+    original.node_count() == result.node_count() && original.edge_count() == result.edge_count()
 }
 
 /// I-7: Locality.
@@ -349,8 +345,14 @@ mod tests {
         // Verify cascade actually changes attributed values
         let result = cascade_engine(&g, Some(10));
         let edges = result.all_edges();
-        let e12 = edges.iter().find(|(_, s, d, _)| *s == ThreadId(1) && *d == ThreadId(2)).unwrap();
-        assert_ne!(e12.3.attributed_delay_ms, e12.3.raw_wait_ms, "cascade must change attribution");
+        let e12 = edges
+            .iter()
+            .find(|(_, s, d, _)| *s == ThreadId(1) && *d == ThreadId(2))
+            .unwrap();
+        assert_ne!(
+            e12.3.attributed_delay_ms, e12.3.raw_wait_ms,
+            "cascade must change attribution"
+        );
 
         // Then verify idempotency
         assert!(check_idempotency(&g, 10));

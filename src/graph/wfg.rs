@@ -4,9 +4,9 @@
 
 use std::collections::BTreeMap;
 
+use petgraph::Direction;
 use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
-use petgraph::Direction;
 
 use super::types::*;
 
@@ -42,7 +42,8 @@ impl WaitForGraph {
     pub fn add_edge(&mut self, src: ThreadId, dst: ThreadId, window: TimeWindow) -> EdgeIndex {
         let src_idx = *self.node_map.get(&src).expect("src node not in graph");
         let dst_idx = *self.node_map.get(&dst).expect("dst node not in graph");
-        self.graph.add_edge(src_idx, dst_idx, EdgeWeight::new(window))
+        self.graph
+            .add_edge(src_idx, dst_idx, EdgeWeight::new(window))
     }
 
     /// Get the ThreadId for a NodeIndex.
@@ -79,7 +80,12 @@ impl WaitForGraph {
             .edge_indices()
             .map(|eidx| {
                 let (src, dst) = self.graph.edge_endpoints(eidx).unwrap();
-                (eidx, self.graph[src].tid, self.graph[dst].tid, &self.graph[eidx])
+                (
+                    eidx,
+                    self.graph[src].tid,
+                    self.graph[dst].tid,
+                    &self.graph[eidx],
+                )
             })
             .collect();
         // Sort by (src_tid, dst_tid) for determinism
@@ -138,12 +144,18 @@ impl WaitForGraph {
 
     /// Sum of all raw_wait_ms across all edges.
     pub fn total_raw_wait(&self) -> u64 {
-        self.graph.edge_indices().map(|e| self.graph[e].raw_wait_ms).sum()
+        self.graph
+            .edge_indices()
+            .map(|e| self.graph[e].raw_wait_ms)
+            .sum()
     }
 
     /// Sum of all attributed_delay_ms across all edges.
     pub fn total_attributed(&self) -> u64 {
-        self.graph.edge_indices().map(|e| self.graph[e].attributed_delay_ms).sum()
+        self.graph
+            .edge_indices()
+            .map(|e| self.graph[e].attributed_delay_ms)
+            .sum()
     }
 }
 

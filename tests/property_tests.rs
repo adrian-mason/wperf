@@ -17,44 +17,49 @@ use wperf::scc::tarjan::build_condensation;
 /// Generate a random WFG with realistic characteristics.
 fn arb_wfg() -> impl Strategy<Value = WaitForGraph> {
     // 2-20 nodes, 1-30 edges
-    (2usize..=20, 1usize..=30).prop_flat_map(|(node_count, max_edges)| {
-        let edge_count = max_edges.min(node_count * 3); // sparse
-        let edges = proptest::collection::vec(
-            (
-                0..node_count, // src
-                0..node_count, // dst
-                0u64..1000,    // start_ms
-                1u64..500,     // duration
-            ),
-            1..=edge_count,
-        );
-        (Just(node_count), edges)
-    })
-    .prop_map(|(node_count, edges)| {
-        let mut g = WaitForGraph::new();
-        for i in 0..node_count {
-            let kind = if i == 0 {
-                NodeKind::UserThread
-            } else {
-                match i % 5 {
-                    0 => NodeKind::KernelThread,
-                    1 | 2 | 3 => NodeKind::UserThread,
-                    _ => NodeKind::PseudoDisk,
-                }
-            };
-            g.add_node(ThreadId(i as i64), kind);
-        }
-
-        for (src, dst, start, dur) in edges {
-            if src != dst {
-                // Skip self-loops for simpler graphs
-                let end = start + dur;
-                g.add_edge(ThreadId(src as i64), ThreadId(dst as i64), TimeWindow::new(start, end));
+    (2usize..=20, 1usize..=30)
+        .prop_flat_map(|(node_count, max_edges)| {
+            let edge_count = max_edges.min(node_count * 3); // sparse
+            let edges = proptest::collection::vec(
+                (
+                    0..node_count, // src
+                    0..node_count, // dst
+                    0u64..1000,    // start_ms
+                    1u64..500,     // duration
+                ),
+                1..=edge_count,
+            );
+            (Just(node_count), edges)
+        })
+        .prop_map(|(node_count, edges)| {
+            let mut g = WaitForGraph::new();
+            for i in 0..node_count {
+                let kind = if i == 0 {
+                    NodeKind::UserThread
+                } else {
+                    match i % 5 {
+                        0 => NodeKind::KernelThread,
+                        1 | 2 | 3 => NodeKind::UserThread,
+                        _ => NodeKind::PseudoDisk,
+                    }
+                };
+                g.add_node(ThreadId(i as i64), kind);
             }
-        }
-        g
-    })
-    .prop_filter("graph must have at least 1 edge", |g| g.edge_count() > 0)
+
+            for (src, dst, start, dur) in edges {
+                if src != dst {
+                    // Skip self-loops for simpler graphs
+                    let end = start + dur;
+                    g.add_edge(
+                        ThreadId(src as i64),
+                        ThreadId(dst as i64),
+                        TimeWindow::new(start, end),
+                    );
+                }
+            }
+            g
+        })
+        .prop_filter("graph must have at least 1 edge", |g| g.edge_count() > 0)
 }
 
 proptest! {

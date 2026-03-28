@@ -39,7 +39,10 @@ fn bug1_visited_path_scope() {
         .iter()
         .find(|(_, s, d, _)| *s == ThreadId(1) && *d == ThreadId(2))
         .unwrap();
-    assert_eq!(ab.3.attributed_delay_ms, 0, "A→B should propagate everything");
+    assert_eq!(
+        ab.3.attributed_delay_ms, 0,
+        "A→B should propagate everything"
+    );
 
     // Both C→E and D→E should have non-zero attribution (leaf paths)
     let ce = edges

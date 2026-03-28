@@ -1,0 +1,39 @@
+--- src/cascade/invariants.rs
++++ replace assert_weight_conserved -> bool with false
+@@ -17,35 +17,17 @@
+ pub fn is_conserved(original: &WaitForGraph, result: &WaitForGraph) -> bool {
+     check_non_amplification(result) && check_locality(original, result)
+ }
+ 
+ /// I-1 enforcement: call after every cascade run.
+ /// Panics in debug builds, logs warning in release builds.
+ /// Returns the conservation status.
+ pub fn assert_weight_conserved(original: &WaitForGraph, result: &WaitForGraph) -> bool {
+-    let i2 = check_non_amplification(result);
+-    let i7 = check_locality(original, result);
+-    let conserved = i2 && i7;
+-
+-    if !conserved {
+-        if cfg!(debug_assertions) {
+-            panic!(
+-                "I-1 VIOLATION: conservation check failed (I-2={}, I-7={})",
+-                i2, i7
+-            );
+-        } else {
+-            eprintln!(
+-                "[wperf] WARNING: I-1 violation (I-2={}, I-7={})",
+-                i2, i7
+-            );
+-        }
+-    }
+-
+-    conserved
++    false /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// I-2: Non-amplification.
+ /// No edge's attributed_delay_ms may exceed its raw_wait_ms.
+ pub fn check_non_amplification(result: &WaitForGraph) -> bool {
+     result
+         .all_edges()
+         .iter()

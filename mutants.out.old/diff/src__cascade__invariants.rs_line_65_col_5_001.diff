@@ -1,0 +1,22 @@
+--- src/cascade/invariants.rs
++++ replace check_termination -> bool with false
+@@ -57,18 +57,17 @@
+ pub fn check_non_negativity(_result: &WaitForGraph) -> bool {
+     true // u64 is always >= 0
+ }
+ 
+ /// I-4: Termination.
+ /// Cascade must not create or remove nodes/edges.
+ /// The topology of the result must match the original.
+ pub fn check_termination(original: &WaitForGraph, result: &WaitForGraph) -> bool {
+-    original.node_count() == result.node_count()
+-        && original.edge_count() == result.edge_count()
++    false /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// I-7: Locality.
+ /// Every edge in result must correspond to an edge in original with
+ /// the same (src, dst) and time_window.
+ pub fn check_locality(original: &WaitForGraph, result: &WaitForGraph) -> bool {
+     let orig_edges = original.all_edges();
+     let res_edges = result.all_edges();

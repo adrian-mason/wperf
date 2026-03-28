@@ -36,7 +36,10 @@ fn figure4_attributed_values() {
         .unwrap();
 
     // Paper says: Parser directly responsible for 20ms, Network for 80ms
-    assert_eq!(user_parser.3.attributed_delay_ms, 20, "User→Parser attributed");
+    assert_eq!(
+        user_parser.3.attributed_delay_ms, 20,
+        "User→Parser attributed"
+    );
     assert_eq!(
         parser_network.3.attributed_delay_ms, 80,
         "Parser→Network attributed"

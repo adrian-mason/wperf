@@ -1,0 +1,21 @@
+--- src/graph/wfg.rs
++++ replace WaitForGraph::node_indices -> Vec<NodeIndex> with vec![]
+@@ -109,17 +109,17 @@
+ 
+     /// Get node weight by index.
+     pub fn node_weight(&self, idx: NodeIndex) -> &NodeWeight {
+         &self.graph[idx]
+     }
+ 
+     /// All node indices, sorted by ThreadId for determinism.
+     pub fn node_indices(&self) -> Vec<NodeIndex> {
+-        self.node_map.values().copied().collect()
++        vec![] /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Clone the graph structure with the same topology but reset
+     /// attributed_delay_ms to raw_wait_ms on all edges.
+     pub fn clone_with_reset_attribution(&self) -> Self {
+         let mut new = Self::new();
+         // Clone nodes
+         for (&tid, &_idx) in &self.node_map {

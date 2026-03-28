@@ -1,0 +1,21 @@
+--- src/graph/wfg.rs
++++ replace WaitForGraph::node_index -> Option<NodeIndex> with None
+@@ -47,17 +47,17 @@
+ 
+     /// Get the ThreadId for a NodeIndex.
+     pub fn thread_id(&self, idx: NodeIndex) -> ThreadId {
+         self.graph[idx].tid
+     }
+ 
+     /// Get NodeIndex for a ThreadId.
+     pub fn node_index(&self, tid: &ThreadId) -> Option<NodeIndex> {
+-        self.node_map.get(tid).copied()
++        None /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Get all outgoing edges from `node` as (EdgeIndex, dst_ThreadId, &EdgeWeight).
+     pub fn outgoing_edges(&self, node: NodeIndex) -> Vec<(EdgeIndex, ThreadId, &EdgeWeight)> {
+         self.graph
+             .edges_directed(node, Direction::Outgoing)
+             .map(|e| (e.id(), self.graph[e.target()].tid, e.weight()))
+             .collect()

@@ -1,0 +1,34 @@
+--- src/cascade/engine.rs
++++ replace count_concurrent_waiters -> u64 with 0
+@@ -125,30 +125,17 @@
+     total_propagated
+ }
+ 
+ fn count_concurrent_waiters(
+     graph: &WaitForGraph,
+     target: ThreadId,
+     window: &TimeWindow,
+ ) -> u64 {
+-    let node_idx = match graph.node_index(&target) {
+-        Some(idx) => idx,
+-        None => return 1,
+-    };
+-
+-    let count = graph
+-        .incoming_edges(node_idx)
+-        .iter()
+-        .filter(|(_, _, ew)| ew.time_window.overlap(window).is_some())
+-        .map(|(_, src_tid, _)| *src_tid)
+-        .collect::<BTreeSet<_>>()
+-        .len();
+-
+-    if count == 0 { 1 } else { count as u64 }
++    0 /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+     use crate::graph::types::NodeKind;
+ 
+     fn figure4_graph() -> WaitForGraph {

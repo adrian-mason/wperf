@@ -1,0 +1,34 @@
+--- src/graph/wfg.rs
++++ replace WaitForGraph::clone_with_reset_attribution -> Self with Default::default()
+@@ -115,30 +115,17 @@
+     /// All node indices, sorted by ThreadId for determinism.
+     pub fn node_indices(&self) -> Vec<NodeIndex> {
+         self.node_map.values().copied().collect()
+     }
+ 
+     /// Clone the graph structure with the same topology but reset
+     /// attributed_delay_ms to raw_wait_ms on all edges.
+     pub fn clone_with_reset_attribution(&self) -> Self {
+-        let mut new = Self::new();
+-        // Clone nodes
+-        for (&tid, &_idx) in &self.node_map {
+-            new.add_node(tid, self.graph[_idx].kind);
+-        }
+-        // Clone edges
+-        for eidx in self.graph.edge_indices() {
+-            let (src, dst) = self.graph.edge_endpoints(eidx).unwrap();
+-            let src_tid = self.graph[src].tid;
+-            let dst_tid = self.graph[dst].tid;
+-            let weight = &self.graph[eidx];
+-            new.add_edge(src_tid, dst_tid, weight.time_window);
+-        }
+-        new
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Sum of all raw_wait_ms across all edges.
+     pub fn total_raw_wait(&self) -> u64 {
+         self.graph.edge_indices().map(|e| self.graph[e].raw_wait_ms).sum()
+     }
+ 
+     /// Sum of all attributed_delay_ms across all edges.

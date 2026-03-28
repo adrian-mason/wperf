@@ -1,3 +1,3 @@
-pub mod tarjan;
-pub mod knot;
 pub mod heuristic;
+pub mod knot;
+pub mod tarjan;

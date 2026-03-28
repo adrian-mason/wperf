@@ -1,0 +1,21 @@
+--- src/graph/wfg.rs
++++ replace WaitForGraph::total_raw_wait -> u64 with 1
+@@ -133,17 +133,17 @@
+             let weight = &self.graph[eidx];
+             new.add_edge(src_tid, dst_tid, weight.time_window);
+         }
+         new
+     }
+ 
+     /// Sum of all raw_wait_ms across all edges.
+     pub fn total_raw_wait(&self) -> u64 {
+-        self.graph.edge_indices().map(|e| self.graph[e].raw_wait_ms).sum()
++        1 /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Sum of all attributed_delay_ms across all edges.
+     pub fn total_attributed(&self) -> u64 {
+         self.graph.edge_indices().map(|e| self.graph[e].attributed_delay_ms).sum()
+     }
+ }
+ 

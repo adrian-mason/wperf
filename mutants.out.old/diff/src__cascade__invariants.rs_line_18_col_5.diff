@@ -1,0 +1,21 @@
+--- src/cascade/invariants.rs
++++ replace is_conserved -> bool with true
+@@ -10,17 +10,17 @@
+ /// Checks I-2 (non-amplification) + I-7 (locality). This runs in ALL
+ /// builds — it is the first line of defense against algorithm bugs.
+ ///
+ /// Note: global sum equality (`Σ attributed == Σ raw`) does NOT hold
+ /// after cascade redistribution. The cascade absorbs weight at
+ /// intermediate nodes, so `total_attributed ≤ total_raw`. Per-edge
+ /// non-amplification (I-2) is the correct conservation check.
+ pub fn is_conserved(original: &WaitForGraph, result: &WaitForGraph) -> bool {
+-    check_non_amplification(result) && check_locality(original, result)
++    true /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// I-1 enforcement: call after every cascade run.
+ /// Panics in debug builds, logs warning in release builds.
+ /// Returns the conservation status.
+ pub fn assert_weight_conserved(original: &WaitForGraph, result: &WaitForGraph) -> bool {
+     let i2 = check_non_amplification(result);
+     let i7 = check_locality(original, result);

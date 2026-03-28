@@ -9,8 +9,8 @@ use std::collections::BTreeSet;
 use super::types::*;
 use super::wfg::WaitForGraph;
 
-use petgraph::visit::EdgeRef;
 use petgraph::Direction;
+use petgraph::visit::EdgeRef;
 
 /// Decompose the outgoing edges of `node` that overlap `window` into
 /// non-overlapping elementary intervals.
@@ -91,10 +91,7 @@ mod tests {
     use super::*;
     use crate::graph::types::NodeKind;
 
-    fn make_graph_with_outgoing(
-        src: ThreadId,
-        edges: &[(ThreadId, u64, u64)],
-    ) -> WaitForGraph {
+    fn make_graph_with_outgoing(src: ThreadId, edges: &[(ThreadId, u64, u64)]) -> WaitForGraph {
         let mut g = WaitForGraph::new();
         g.add_node(src, NodeKind::UserThread);
         for &(dst, s, e) in edges {
@@ -134,10 +131,8 @@ mod tests {
         // B -> C [0, 60), B -> D [20, 80)
         // Window [0, 100)
         // Expected: [0,20)={C}, [20,60)={C,D}, [60,80)={D}
-        let g = make_graph_with_outgoing(
-            ThreadId(1),
-            &[(ThreadId(2), 0, 60), (ThreadId(3), 20, 80)],
-        );
+        let g =
+            make_graph_with_outgoing(ThreadId(1), &[(ThreadId(2), 0, 60), (ThreadId(3), 20, 80)]);
         let result = sweep_line_partition(&g, ThreadId(1), &TimeWindow::new(0, 100));
 
         assert_eq!(result.len(), 3);
@@ -155,10 +150,8 @@ mod tests {
     #[test]
     fn non_overlapping_edges() {
         // B -> C [0, 30), B -> D [50, 80)
-        let g = make_graph_with_outgoing(
-            ThreadId(1),
-            &[(ThreadId(2), 0, 30), (ThreadId(3), 50, 80)],
-        );
+        let g =
+            make_graph_with_outgoing(ThreadId(1), &[(ThreadId(2), 0, 30), (ThreadId(3), 50, 80)]);
         let result = sweep_line_partition(&g, ThreadId(1), &TimeWindow::new(0, 100));
 
         assert_eq!(result.len(), 2);
@@ -168,10 +161,8 @@ mod tests {
 
     #[test]
     fn total_coverage_equals_sum_of_intervals() {
-        let g = make_graph_with_outgoing(
-            ThreadId(1),
-            &[(ThreadId(2), 0, 60), (ThreadId(3), 20, 80)],
-        );
+        let g =
+            make_graph_with_outgoing(ThreadId(1), &[(ThreadId(2), 0, 60), (ThreadId(3), 20, 80)]);
         let result = sweep_line_partition(&g, ThreadId(1), &TimeWindow::new(0, 100));
         let total: u64 = result.iter().map(|i| i.window.duration()).sum();
         // Coverage = [0,80) = 80ms (union of [0,60) and [20,80))

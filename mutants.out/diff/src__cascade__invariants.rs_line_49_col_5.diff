@@ -1,0 +1,24 @@
+--- src/cascade/invariants.rs
++++ replace check_non_amplification -> bool with true
+@@ -41,20 +41,17 @@
+     }
+ 
+     conserved
+ }
+ 
+ /// I-2: Non-amplification.
+ /// No edge's attributed_delay_ms may exceed its raw_wait_ms.
+ pub fn check_non_amplification(result: &WaitForGraph) -> bool {
+-    result
+-        .all_edges()
+-        .iter()
+-        .all(|(_, _, _, ew)| ew.attributed_delay_ms <= ew.raw_wait_ms)
++    true /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// I-3: Non-negativity.
+ /// All attributed_delay_ms >= 0. Trivially true for u64, but documents intent.
+ pub fn check_non_negativity(_result: &WaitForGraph) -> bool {
+     true // u64 is always >= 0
+ }
+ 

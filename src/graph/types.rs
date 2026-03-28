@@ -46,7 +46,10 @@ impl TimeWindow {
         let s = self.start_ms.max(other.start_ms);
         let e = self.end_ms.min(other.end_ms);
         if s < e {
-            Some(TimeWindow { start_ms: s, end_ms: e })
+            Some(TimeWindow {
+                start_ms: s,
+                end_ms: e,
+            })
         } else {
             None
         }

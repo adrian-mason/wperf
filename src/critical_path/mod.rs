@@ -3,10 +3,10 @@
 //! O(V+E) dynamic programming via topological sort. Extracts the
 //! maximum-weight path — the critical delay chain.
 
+use petgraph::Direction;
 use petgraph::algo::toposort;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
-use petgraph::Direction;
 use serde::Serialize;
 
 use crate::graph::types::ThreadId;
@@ -74,11 +74,7 @@ pub fn critical_path_dp(cdag: &CondensationDag) -> Option<CriticalPath> {
     }
 
     // Find the node with maximum distance
-    let (end_idx, &max_dist) = dist
-        .iter()
-        .enumerate()
-        .max_by_key(|(_, d)| *d)
-        .unwrap();
+    let (end_idx, &max_dist) = dist.iter().enumerate().max_by_key(|(_, d)| *d).unwrap();
     let end = NodeIndex::new(end_idx);
 
     // Trace back the path

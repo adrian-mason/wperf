@@ -1,0 +1,380 @@
+
+*** src/cascade/invariants.rs:76:25: replace != with == in check_locality
+
+*** mutation diff:
+--- src/cascade/invariants.rs
++++ replace != with == in check_locality
+@@ -68,17 +68,17 @@
+ 
+ /// I-7: Locality.
+ /// Every edge in result must correspond to an edge in original with
+ /// the same (src, dst) and time_window.
+ pub fn check_locality(original: &WaitForGraph, result: &WaitForGraph) -> bool {
+     let orig_edges = original.all_edges();
+     let res_edges = result.all_edges();
+ 
+-    if orig_edges.len() != res_edges.len() {
++    if orig_edges.len() == /* ~ changed by cargo-mutants ~ */ res_edges.len() {
+         return false;
+     }
+ 
+     for (orig, res) in orig_edges.iter().zip(res_edges.iter()) {
+         // Same endpoints
+         if orig.1 != res.1 || orig.2 != res.2 {
+             return false;
+         }
+
+
+*** /home/maverick/.rustup/toolchains/1.94-x86_64-unknown-linux-gnu/bin/cargo test --no-run --verbose --package=wperf@0.1.0
+       Fresh libc v0.2.183
+       Fresh cfg-if v1.0.4
+       Fresh unicode-ident v1.0.24
+       Fresh equivalent v1.0.2
+       Fresh hashbrown v0.16.1
+       Fresh linux-raw-sys v0.12.1
+       Fresh autocfg v1.5.0
+       Fresh foldhash v0.1.5
+       Fresh bitflags v2.11.0
+       Fresh itoa v1.0.18
+       Fresh fixedbitset v0.5.7
+       Fresh memchr v2.8.0
+       Fresh once_cell v1.21.4
+       Fresh fastrand v2.3.0
+       Fresh wait-timeout v0.2.1
+       Fresh bit-vec v0.8.0
+       Fresh fnv v1.0.7
+       Fresh hashbrown v0.15.5
+       Fresh indexmap v2.13.0
+       Fresh quick-error v1.2.3
+       Fresh bit-set v0.8.0
+       Fresh unarray v0.1.4
+       Fresh regex-syntax v0.8.10
+       Fresh proc-macro2 v1.0.106
+       Fresh getrandom v0.3.4
+       Fresh serde_core v1.0.228
+       Fresh zerocopy v0.8.47
+       Fresh rustix v1.1.4
+       Fresh zmij v1.0.21
+       Fresh getrandom v0.4.2
+       Fresh petgraph v0.8.3
+       Fresh quote v1.0.45
+       Fresh rand_core v0.9.5
+       Fresh tempfile v3.27.0
+       Fresh ppv-lite86 v0.2.21
+       Fresh serde_json v1.0.149
+       Fresh num-traits v0.2.19
+       Fresh syn v2.0.117
+       Fresh rand_chacha v0.9.0
+       Fresh rand_xorshift v0.4.0
+       Fresh rusty-fork v0.3.1
+       Fresh rand v0.9.2
+       Fresh serde_derive v1.0.228
+       Fresh proptest v1.11.0
+       Fresh serde v1.0.228
+       Dirty wperf v0.1.0 (/tmp/cargo-mutants-phase0-3YNLf4.tmp): the file `src/cascade/invariants.rs` has changed (1774690374.233343419s, 1s after last build at 1774690373.865205981s)
+   Compiling wperf v0.1.0 (/tmp/cargo-mutants-phase0-3YNLf4.tmp)
+     Running `/home/maverick/.rustup/toolchains/1.94-x86_64-unknown-linux-gnu/bin/rustc --crate-name wperf --edition=2024 src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=b336c738ac6331ae -C extra-filename=-3eb8c1cfaa96dc7b --out-dir /tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps -C linker=clang -C incremental=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/incremental -L dependency=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps --extern petgraph=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libpetgraph-4acf2b925821119a.rlib --extern proptest=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libproptest-cf23810614906ad5.rlib --extern serde=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde-3a4ab966af36b62f.rlib --extern serde_json=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde_json-b75ff9ddc7ba4b13.rlib -C link-arg=-fuse-ld=/usr/bin/mold`
+     Running `/home/maverick/.rustup/toolchains/1.94-x86_64-unknown-linux-gnu/bin/rustc --crate-name wperf --edition=2024 src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C debuginfo=2 --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=63bedfa4aa42468d -C extra-filename=-9b008d9ff48e6c45 --out-dir /tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps -C linker=clang -C incremental=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/incremental -L dependency=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps --extern petgraph=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libpetgraph-4acf2b925821119a.rmeta --extern serde=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde-3a4ab966af36b62f.rmeta --extern serde_json=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde_json-b75ff9ddc7ba4b13.rmeta -C link-arg=-fuse-ld=/usr/bin/mold`
+     Running `/home/maverick/.rustup/toolchains/1.94-x86_64-unknown-linux-gnu/bin/rustc --crate-name wperf --edition=2024 src/main.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=2c3a73f1cbc1093b -C extra-filename=-9857860045fbe361 --out-dir /tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps -C linker=clang -C incremental=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/incremental -L dependency=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps --extern petgraph=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libpetgraph-4acf2b925821119a.rlib --extern proptest=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libproptest-cf23810614906ad5.rlib --extern serde=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde-3a4ab966af36b62f.rlib --extern serde_json=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde_json-b75ff9ddc7ba4b13.rlib --extern wperf=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libwperf-9b008d9ff48e6c45.rlib -C link-arg=-fuse-ld=/usr/bin/mold`
+     Running `/home/maverick/.rustup/toolchains/1.94-x86_64-unknown-linux-gnu/bin/rustc --crate-name property_tests --edition=2024 tests/property_tests.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=67fa9d30330fd112 -C extra-filename=-f04d0b7f42edbcbd --out-dir /tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps -C linker=clang -C incremental=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/incremental -L dependency=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps --extern petgraph=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libpetgraph-4acf2b925821119a.rlib --extern proptest=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libproptest-cf23810614906ad5.rlib --extern serde=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde-3a4ab966af36b62f.rlib --extern serde_json=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde_json-b75ff9ddc7ba4b13.rlib --extern wperf=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libwperf-9b008d9ff48e6c45.rlib -C link-arg=-fuse-ld=/usr/bin/mold`
+     Running `/home/maverick/.rustup/toolchains/1.94-x86_64-unknown-linux-gnu/bin/rustc --crate-name wperf --edition=2024 src/main.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type bin --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=5fd7fe767c7df5ce -C extra-filename=-73fde0623e0a466c --out-dir /tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps -C linker=clang -C incremental=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/incremental -L dependency=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps --extern petgraph=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libpetgraph-4acf2b925821119a.rlib --extern serde=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde-3a4ab966af36b62f.rlib --extern serde_json=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde_json-b75ff9ddc7ba4b13.rlib --extern wperf=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libwperf-9b008d9ff48e6c45.rlib -C link-arg=-fuse-ld=/usr/bin/mold`
+     Running `/home/maverick/.rustup/toolchains/1.94-x86_64-unknown-linux-gnu/bin/rustc --crate-name figure4 --edition=2024 tests/figure4.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=e341eaeed59af09a -C extra-filename=-6a1a30b54342afca --out-dir /tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps -C linker=clang -C incremental=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/incremental -L dependency=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps --extern petgraph=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libpetgraph-4acf2b925821119a.rlib --extern proptest=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libproptest-cf23810614906ad5.rlib --extern serde=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde-3a4ab966af36b62f.rlib --extern serde_json=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde_json-b75ff9ddc7ba4b13.rlib --extern wperf=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libwperf-9b008d9ff48e6c45.rlib -C link-arg=-fuse-ld=/usr/bin/mold`
+     Running `/home/maverick/.rustup/toolchains/1.94-x86_64-unknown-linux-gnu/bin/rustc --crate-name bug_regressions --edition=2024 tests/bug_regressions.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=a48fe995a8372ca8 -C extra-filename=-b12b9cdaeb3673e0 --out-dir /tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps -C linker=clang -C incremental=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/incremental -L dependency=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps --extern petgraph=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libpetgraph-4acf2b925821119a.rlib --extern proptest=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libproptest-cf23810614906ad5.rlib --extern serde=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde-3a4ab966af36b62f.rlib --extern serde_json=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde_json-b75ff9ddc7ba4b13.rlib --extern wperf=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libwperf-9b008d9ff48e6c45.rlib -C link-arg=-fuse-ld=/usr/bin/mold`
+     Running `/home/maverick/.rustup/toolchains/1.94-x86_64-unknown-linux-gnu/bin/rustc --crate-name differential --edition=2024 tests/differential.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=7d173dab9c594ec0 -C extra-filename=-9b73337c85685898 --out-dir /tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps -C linker=clang -C incremental=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/incremental -L dependency=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps --extern petgraph=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libpetgraph-4acf2b925821119a.rlib --extern proptest=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libproptest-cf23810614906ad5.rlib --extern serde=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde-3a4ab966af36b62f.rlib --extern serde_json=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libserde_json-b75ff9ddc7ba4b13.rlib --extern wperf=/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/libwperf-9b008d9ff48e6c45.rlib -C link-arg=-fuse-ld=/usr/bin/mold`
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.26s
+  Executable `/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/wperf-3eb8c1cfaa96dc7b`
+  Executable `/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/wperf-9857860045fbe361`
+  Executable `/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/bug_regressions-b12b9cdaeb3673e0`
+  Executable `/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/differential-9b73337c85685898`
+  Executable `/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/figure4-6a1a30b54342afca`
+  Executable `/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/property_tests-f04d0b7f42edbcbd`
+
+*** result: Success
+
+*** /home/maverick/.rustup/toolchains/1.94-x86_64-unknown-linux-gnu/bin/cargo test --verbose --package=wperf@0.1.0
+       Fresh libc v0.2.183
+       Fresh cfg-if v1.0.4
+       Fresh unicode-ident v1.0.24
+       Fresh linux-raw-sys v0.12.1
+       Fresh autocfg v1.5.0
+       Fresh equivalent v1.0.2
+       Fresh bitflags v2.11.0
+       Fresh foldhash v0.1.5
+       Fresh hashbrown v0.16.1
+       Fresh memchr v2.8.0
+       Fresh itoa v1.0.18
+       Fresh fastrand v2.3.0
+       Fresh fixedbitset v0.5.7
+       Fresh once_cell v1.21.4
+       Fresh wait-timeout v0.2.1
+       Fresh bit-vec v0.8.0
+       Fresh quick-error v1.2.3
+       Fresh fnv v1.0.7
+       Fresh unarray v0.1.4
+       Fresh regex-syntax v0.8.10
+       Fresh proc-macro2 v1.0.106
+       Fresh getrandom v0.3.4
+       Fresh serde_core v1.0.228
+       Fresh indexmap v2.13.0
+       Fresh hashbrown v0.15.5
+       Fresh bit-set v0.8.0
+       Fresh quote v1.0.45
+       Fresh rand_core v0.9.5
+       Fresh getrandom v0.4.2
+       Fresh zmij v1.0.21
+       Fresh zerocopy v0.8.47
+       Fresh rustix v1.1.4
+       Fresh petgraph v0.8.3
+       Fresh syn v2.0.117
+       Fresh tempfile v3.27.0
+       Fresh ppv-lite86 v0.2.21
+       Fresh serde_json v1.0.149
+       Fresh rand v0.9.2
+       Fresh rand_xorshift v0.4.0
+       Fresh num-traits v0.2.19
+       Fresh serde_derive v1.0.228
+       Fresh rusty-fork v0.3.1
+       Fresh rand_chacha v0.9.0
+       Fresh serde v1.0.228
+       Fresh proptest v1.11.0
+       Fresh wperf v0.1.0 (/tmp/cargo-mutants-phase0-3YNLf4.tmp)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running `/tmp/cargo-mutants-phase0-3YNLf4.tmp/target/debug/deps/wperf-3eb8c1cfaa96dc7b`
+
+running 68 tests
+test cascade::engine::tests::cascade_single_edge ... FAILED
+test cascade::engine::tests::cascade_extended_3node ... FAILED
+test cascade::engine::tests::cascade_no_amplification ... FAILED
+test cascade::engine::tests::cascade_leaf_nonzero ... FAILED
+test cascade::engine::tests::cascade_figure4 ... FAILED
+test cascade::engine::tests::concurrent_waiters_divides_weight ... FAILED
+test cascade::engine::tests::depth_limit_changes_result ... FAILED
+test cascade::engine::tests::is_conserved_false_on_bad_graph ... FAILED
+test cascade::engine::tests::node_indices_returns_all_nodes ... ok
+test cascade::invariants::tests::conservation_detects_amplification ... ok
+test cascade::invariants::tests::assert_weight_conserved_returns_true_on_valid ... FAILED
+test cascade::engine::tests::total_attributed_less_than_raw ... FAILED
+test cascade::invariants::tests::conservation_detects_locality_violation ... FAILED
+test cascade::invariants::tests::conservation_passes_on_cascade_result ... FAILED
+test cascade::invariants::tests::conservation_passes_on_identity ... FAILED
+test cascade::invariants::tests::depth_monotonicity_verified_numerically ... FAILED
+test cascade::invariants::tests::depth_monotonicity_passes_on_chain ... FAILED
+test cascade::invariants::tests::locality_detects_extra_edge ... FAILED
+test cascade::invariants::tests::idempotency_actually_runs_cascade ... FAILED
+test cascade::invariants::tests::idempotency_passes_on_figure4 ... FAILED
+test cascade::invariants::tests::locality_detects_src_only_change ... ok
+test cascade::invariants::tests::non_amplification_detects_violation ... ok
+test cascade::invariants::tests::non_amplification_passes ... ok
+test cascade::invariants::tests::locality_detects_window_change ... ok
+test cascade::invariants::tests::non_negativity_trivially_true ... ok
+test cascade::invariants::tests::locality_passes_on_clone ... FAILED
+test cascade::invariants::tests::termination_detects_node_only_change ... ok
+test cascade::invariants::tests::termination_passes_on_clone ... ok
+test cascade::invariants::tests::termination_detects_topology_change ... ok
+test critical_path::tests::branching_picks_heavier_path ... FAILED
+test critical_path::tests::empty_dag ... ok
+test critical_path::tests::figure4_critical_path ... FAILED
+test critical_path::tests::single_edge_critical_path ... FAILED
+test critical_path::tests::single_node ... ok
+test graph::sweep::tests::no_outgoing ... ok
+test graph::sweep::tests::total_coverage_equals_sum_of_intervals ... ok
+test graph::sweep::tests::non_overlapping_edges ... ok
+test graph::sweep::tests::single_edge_full_overlap ... ok
+test graph::sweep::tests::two_overlapping_edges ... ok
+test graph::types::tests::thread_id_display ... ok
+test graph::types::tests::time_window_contains ... ok
+test graph::types::tests::time_window_duration ... ok
+test graph::types::tests::time_window_overlap ... ok
+test graph::wfg::tests::add_nodes_and_edges ... ok
+test graph::wfg::tests::idempotent_add_node ... ok
+test graph::wfg::tests::outgoing_edges ... ok
+test graph::wfg::tests::total_raw_wait ... ok
+test scc::heuristic::tests::cycle_weight_from_internal_edges ... ok
+test scc::heuristic::tests::isolated_node_zero_weight ... ok
+test scc::heuristic::tests::apply_heuristic_sets_weights ... FAILED
+test scc::heuristic::tests::heuristic_on_figure4 ... FAILED
+test scc::knot::tests::cycle_sink_is_knot ... ok
+test scc::knot::tests::non_sink_cycle_not_a_knot ... ok
+test scc::heuristic::tests::singleton_weight_from_incident_edges ... FAILED
+test scc::knot::tests::mixed_kernel_user_scc_is_knot ... ok
+test graph::sweep::tests::single_edge_partial_overlap ... ok
+test scc::knot::tests::self_loop_sink_is_knot ... ok
+test scc::knot::tests::pure_kernel_scc_excluded ... ok
+test scc::tarjan::tests::acyclic_graph_all_singleton_sccs ... ok
+test scc::knot::tests::trivial_sink_excluded ... ok
+test scc::tarjan::tests::condensation_acyclic ... ok
+test scc::tarjan::tests::condensation_sinks ... ok
+test scc::tarjan::tests::condensation_with_cycle ... ok
+test scc::tarjan::tests::mixed_cycle_and_chain ... ok
+test scc::tarjan::tests::internal_edges_of_cycle ... ok
+test scc::tarjan::tests::simple_cycle_one_scc ... ok
+test scc::tarjan::tests::three_node_cycle ... ok
+test critical_path::tests::long_chain_linear_complexity ... FAILED
+
+failures:
+
+---- cascade::engine::tests::cascade_single_edge stdout ----
+
+thread 'cascade::engine::tests::cascade_single_edge' (401072) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- cascade::engine::tests::cascade_extended_3node stdout ----
+
+thread 'cascade::engine::tests::cascade_extended_3node' (401068) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- cascade::engine::tests::cascade_no_amplification stdout ----
+
+thread 'cascade::engine::tests::cascade_no_amplification' (401071) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- cascade::engine::tests::cascade_leaf_nonzero stdout ----
+
+thread 'cascade::engine::tests::cascade_leaf_nonzero' (401070) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- cascade::engine::tests::cascade_figure4 stdout ----
+
+thread 'cascade::engine::tests::cascade_figure4' (401069) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- cascade::engine::tests::concurrent_waiters_divides_weight stdout ----
+
+thread 'cascade::engine::tests::concurrent_waiters_divides_weight' (401073) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- cascade::engine::tests::depth_limit_changes_result stdout ----
+
+thread 'cascade::engine::tests::depth_limit_changes_result' (401074) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- cascade::engine::tests::is_conserved_false_on_bad_graph stdout ----
+
+thread 'cascade::engine::tests::is_conserved_false_on_bad_graph' (401075) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- cascade::invariants::tests::assert_weight_conserved_returns_true_on_valid stdout ----
+
+thread 'cascade::invariants::tests::assert_weight_conserved_returns_true_on_valid' (401078) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- cascade::engine::tests::total_attributed_less_than_raw stdout ----
+
+thread 'cascade::engine::tests::total_attributed_less_than_raw' (401077) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- cascade::invariants::tests::conservation_detects_locality_violation stdout ----
+
+thread 'cascade::invariants::tests::conservation_detects_locality_violation' (401080) panicked at src/cascade/invariants.rs:189:9:
+assertion failed: !is_conserved(&g, &bad)
+
+---- cascade::invariants::tests::conservation_passes_on_cascade_result stdout ----
+
+thread 'cascade::invariants::tests::conservation_passes_on_cascade_result' (401081) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- cascade::invariants::tests::conservation_passes_on_identity stdout ----
+
+thread 'cascade::invariants::tests::conservation_passes_on_identity' (401082) panicked at src/cascade/invariants.rs:146:9:
+assertion failed: is_conserved(&g, &result)
+
+---- cascade::invariants::tests::depth_monotonicity_verified_numerically stdout ----
+
+thread 'cascade::invariants::tests::depth_monotonicity_verified_numerically' (401084) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- cascade::invariants::tests::depth_monotonicity_passes_on_chain stdout ----
+
+thread 'cascade::invariants::tests::depth_monotonicity_passes_on_chain' (401083) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- cascade::invariants::tests::locality_detects_extra_edge stdout ----
+
+thread 'cascade::invariants::tests::locality_detects_extra_edge' (401087) panicked at src/cascade/invariants.rs:295:9:
+assertion failed: !check_locality(&g, &bad)
+
+---- cascade::invariants::tests::idempotency_actually_runs_cascade stdout ----
+
+thread 'cascade::invariants::tests::idempotency_actually_runs_cascade' (401085) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- cascade::invariants::tests::idempotency_passes_on_figure4 stdout ----
+
+thread 'cascade::invariants::tests::idempotency_passes_on_figure4' (401086) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- cascade::invariants::tests::locality_passes_on_clone stdout ----
+
+thread 'cascade::invariants::tests::locality_passes_on_clone' (401090) panicked at src/cascade/invariants.rs:282:9:
+assertion failed: check_locality(&g, &result)
+
+---- critical_path::tests::branching_picks_heavier_path stdout ----
+
+thread 'critical_path::tests::branching_picks_heavier_path' (401097) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- critical_path::tests::figure4_critical_path stdout ----
+
+thread 'critical_path::tests::figure4_critical_path' (401099) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- critical_path::tests::single_edge_critical_path stdout ----
+
+thread 'critical_path::tests::single_edge_critical_path' (401101) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- scc::heuristic::tests::apply_heuristic_sets_weights stdout ----
+
+thread 'scc::heuristic::tests::apply_heuristic_sets_weights' (401117) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- scc::heuristic::tests::heuristic_on_figure4 stdout ----
+
+thread 'scc::heuristic::tests::heuristic_on_figure4' (401119) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- scc::heuristic::tests::singleton_weight_from_incident_edges stdout ----
+
+thread 'scc::heuristic::tests::singleton_weight_from_incident_edges' (401121) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+---- critical_path::tests::long_chain_linear_complexity stdout ----
+
+thread 'critical_path::tests::long_chain_linear_complexity' (401100) panicked at src/cascade/invariants.rs:31:13:
+I-1 VIOLATION: conservation check failed (I-2=true, I-7=false)
+
+
+failures:
+    cascade::engine::tests::cascade_extended_3node
+    cascade::engine::tests::cascade_figure4
+    cascade::engine::tests::cascade_leaf_nonzero
+    cascade::engine::tests::cascade_no_amplification
+    cascade::engine::tests::cascade_single_edge
+    cascade::engine::tests::concurrent_waiters_divides_weight
+    cascade::engine::tests::depth_limit_changes_result
+    cascade::engine::tests::is_conserved_false_on_bad_graph
+    cascade::engine::tests::total_attributed_less_than_raw
+    cascade::invariants::tests::assert_weight_conserved_returns_true_on_valid
+    cascade::invariants::tests::conservation_detects_locality_violation
+    cascade::invariants::tests::conservation_passes_on_cascade_result
+    cascade::invariants::tests::conservation_passes_on_identity
+    cascade::invariants::tests::depth_monotonicity_passes_on_chain
+    cascade::invariants::tests::depth_monotonicity_verified_numerically
+    cascade::invariants::tests::idempotency_actually_runs_cascade
+    cascade::invariants::tests::idempotency_passes_on_figure4
+    cascade::invariants::tests::locality_detects_extra_edge
+    cascade::invariants::tests::locality_passes_on_clone
+    critical_path::tests::branching_picks_heavier_path
+    critical_path::tests::figure4_critical_path
+    critical_path::tests::long_chain_linear_complexity
+    critical_path::tests::single_edge_critical_path
+    scc::heuristic::tests::apply_heuristic_sets_weights
+    scc::heuristic::tests::heuristic_on_figure4
+    scc::heuristic::tests::singleton_weight_from_incident_edges
+
+test result: FAILED. 42 passed; 26 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p wperf --lib`
+
+*** result: Failure(101)

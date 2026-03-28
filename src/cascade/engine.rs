@@ -43,8 +43,7 @@ pub fn cascade_engine(graph: &WaitForGraph, max_depth: Option<u32>) -> WaitForGr
         let mut path = BTreeSet::new();
         path.insert(src_tid);
 
-        let propagated =
-            compute_cascade(graph, dst_tid, &window, 1, max_depth, &mut path);
+        let propagated = compute_cascade(graph, dst_tid, &window, 1, max_depth, &mut path);
 
         let attributed = raw_wait.saturating_sub(propagated);
         attribution.insert(eidx, attributed);
@@ -106,7 +105,12 @@ fn compute_cascade(
 
         for &next_node in &interval.targets {
             let _prop_down = compute_cascade(
-                graph, next_node, &interval.window, depth + 1, max_depth, path,
+                graph,
+                next_node,
+                &interval.window,
+                depth + 1,
+                max_depth,
+                path,
             );
 
             // NEW-BUG-1 FIX: child absorbs interval duration (prop_down + self_blame)
@@ -125,11 +129,7 @@ fn compute_cascade(
     total_propagated
 }
 
-fn count_concurrent_waiters(
-    graph: &WaitForGraph,
-    target: ThreadId,
-    window: &TimeWindow,
-) -> u64 {
+fn count_concurrent_waiters(graph: &WaitForGraph, target: ThreadId, window: &TimeWindow) -> u64 {
     let node_idx = match graph.node_index(&target) {
         Some(idx) => idx,
         None => return 1,
@@ -179,8 +179,14 @@ mod tests {
         let result = cascade_engine(&g, None);
 
         let edges = result.all_edges();
-        let user_parser = edges.iter().find(|(_, s, d, _)| *s == ThreadId(1) && *d == ThreadId(2)).unwrap();
-        let parser_network = edges.iter().find(|(_, s, d, _)| *s == ThreadId(2) && *d == ThreadId(3)).unwrap();
+        let user_parser = edges
+            .iter()
+            .find(|(_, s, d, _)| *s == ThreadId(1) && *d == ThreadId(2))
+            .unwrap();
+        let parser_network = edges
+            .iter()
+            .find(|(_, s, d, _)| *s == ThreadId(2) && *d == ThreadId(3))
+            .unwrap();
 
         // User→Parser: raw=100, propagated 80 to Network → attributed=20
         assert_eq!(user_parser.3.attributed_delay_ms, 20, "User→Parser");
@@ -202,9 +208,18 @@ mod tests {
         let result = cascade_engine(&g, None);
         let edges = result.all_edges();
 
-        let up = edges.iter().find(|(_, s, d, _)| *s == ThreadId(1) && *d == ThreadId(2)).unwrap();
-        let pn = edges.iter().find(|(_, s, d, _)| *s == ThreadId(2) && *d == ThreadId(3)).unwrap();
-        let nd = edges.iter().find(|(_, s, d, _)| *s == ThreadId(3) && *d == ThreadId(4)).unwrap();
+        let up = edges
+            .iter()
+            .find(|(_, s, d, _)| *s == ThreadId(1) && *d == ThreadId(2))
+            .unwrap();
+        let pn = edges
+            .iter()
+            .find(|(_, s, d, _)| *s == ThreadId(2) && *d == ThreadId(3))
+            .unwrap();
+        let nd = edges
+            .iter()
+            .find(|(_, s, d, _)| *s == ThreadId(3) && *d == ThreadId(4))
+            .unwrap();
 
         // User→Parser: raw=100, propagated=80 → attributed=20
         assert_eq!(up.3.attributed_delay_ms, 20);
@@ -219,7 +234,10 @@ mod tests {
         let g = figure4_graph();
         let result = cascade_engine(&g, None);
         let edges = result.all_edges();
-        let parser_network = edges.iter().find(|(_, s, d, _)| *s == ThreadId(2) && *d == ThreadId(3)).unwrap();
+        let parser_network = edges
+            .iter()
+            .find(|(_, s, d, _)| *s == ThreadId(2) && *d == ThreadId(3))
+            .unwrap();
         assert!(parser_network.3.attributed_delay_ms > 0);
     }
 
@@ -259,7 +277,10 @@ mod tests {
         let result = cascade_engine(&g, None);
         let edges = result.all_edges();
 
-        let e12 = edges.iter().find(|(_, s, d, _)| *s == ThreadId(1) && *d == ThreadId(2)).unwrap();
+        let e12 = edges
+            .iter()
+            .find(|(_, s, d, _)| *s == ThreadId(1) && *d == ThreadId(2))
+            .unwrap();
 
         // Without concurrent_waiters: propagated=100, attributed=0
         // With concurrent_waiters=2: propagated=100/2=50, attributed=50
@@ -284,13 +305,22 @@ mod tests {
         let s_edges = shallow.all_edges();
         let d_edges = deep.all_edges();
 
-        let s12 = s_edges.iter().find(|(_, s, d, _)| *s == ThreadId(1) && *d == ThreadId(2)).unwrap();
-        let d12 = d_edges.iter().find(|(_, s, d, _)| *s == ThreadId(1) && *d == ThreadId(2)).unwrap();
+        let s12 = s_edges
+            .iter()
+            .find(|(_, s, d, _)| *s == ThreadId(1) && *d == ThreadId(2))
+            .unwrap();
+        let d12 = d_edges
+            .iter()
+            .find(|(_, s, d, _)| *s == ThreadId(1) && *d == ThreadId(2))
+            .unwrap();
 
         // max_depth=1: compute_cascade called with depth=1, hits limit immediately → attributed=raw=100
         assert_eq!(s12.3.attributed_delay_ms, 100, "depth=1 → no cascade");
         // max_depth=10: full cascade → attributed < raw
-        assert!(d12.3.attributed_delay_ms < 100, "depth=10 → cascade reduces attribution");
+        assert!(
+            d12.3.attributed_delay_ms < 100,
+            "depth=10 → cascade reduces attribution"
+        );
     }
 
     #[test]
