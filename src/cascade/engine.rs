@@ -229,4 +229,83 @@ mod tests {
         let result = cascade_engine(&g, None);
         assert!(is_conserved(&g, &result));
     }
+
+    #[test]
+    fn is_conserved_false_on_bad_graph() {
+        let g = figure4_graph();
+        let mut result = cascade_engine(&g, None);
+        // Corrupt: set attributed > raw on first edge
+        let edges = result.all_edges();
+        let eidx = edges[0].0;
+        result.edge_weight_mut(eidx).attributed_delay_ms = 999;
+        assert!(!is_conserved(&g, &result));
+    }
+
+    #[test]
+    fn concurrent_waiters_divides_weight() {
+        // T1→T2 [0,100), T2→T3 [0,100), T4→T3 [0,100)
+        // T3 has 2 incoming edges (from T2 and T4) → external_waiters=2
+        // When cascading T1→T2, T2's child T3 has 2 concurrent waiters
+        // → transfer is divided by 2
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_node(ThreadId(3), NodeKind::UserThread);
+        g.add_node(ThreadId(4), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 100));
+        g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(0, 100));
+        g.add_edge(ThreadId(4), ThreadId(3), TimeWindow::new(0, 100));
+
+        let result = cascade_engine(&g, None);
+        let edges = result.all_edges();
+
+        let e12 = edges.iter().find(|(_, s, d, _)| *s == ThreadId(1) && *d == ThreadId(2)).unwrap();
+
+        // Without concurrent_waiters: propagated=100, attributed=0
+        // With concurrent_waiters=2: propagated=100/2=50, attributed=50
+        assert_eq!(e12.3.attributed_delay_ms, 50, "T1→T2 with 2 waiters on T3");
+    }
+
+    #[test]
+    fn depth_limit_changes_result() {
+        // Chain: T1→T2→T3→T4, overlapping windows
+        // With max_depth=1: no propagation (depth starts at 1, immediately hits limit)
+        // With max_depth=10: full propagation
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_node(ThreadId(3), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 100));
+        g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(0, 100));
+
+        let shallow = cascade_engine(&g, Some(1));
+        let deep = cascade_engine(&g, Some(10));
+
+        let s_edges = shallow.all_edges();
+        let d_edges = deep.all_edges();
+
+        let s12 = s_edges.iter().find(|(_, s, d, _)| *s == ThreadId(1) && *d == ThreadId(2)).unwrap();
+        let d12 = d_edges.iter().find(|(_, s, d, _)| *s == ThreadId(1) && *d == ThreadId(2)).unwrap();
+
+        // max_depth=1: compute_cascade called with depth=1, hits limit immediately → attributed=raw=100
+        assert_eq!(s12.3.attributed_delay_ms, 100, "depth=1 → no cascade");
+        // max_depth=10: full cascade → attributed < raw
+        assert!(d12.3.attributed_delay_ms < 100, "depth=10 → cascade reduces attribution");
+    }
+
+    #[test]
+    fn total_attributed_less_than_raw() {
+        let g = figure4_graph();
+        let result = cascade_engine(&g, None);
+        // Total attributed should be less than total raw (weight absorbed by cascade)
+        assert!(result.total_attributed() < g.total_raw_wait());
+        assert!(result.total_attributed() > 0);
+    }
+
+    #[test]
+    fn node_indices_returns_all_nodes() {
+        let g = figure4_graph();
+        let indices = g.node_indices();
+        assert_eq!(indices.len(), 3);
+    }
 }

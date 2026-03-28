@@ -296,6 +296,84 @@ mod tests {
     }
 
     #[test]
+    fn assert_weight_conserved_returns_true_on_valid() {
+        use crate::cascade::engine::cascade_engine;
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
+
+        let result = cascade_engine(&g, None);
+        assert!(assert_weight_conserved(&g, &result));
+    }
+
+    #[test]
+    fn termination_detects_node_only_change() {
+        // Same edge count but different node count
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
+
+        let mut bad = g.clone_with_reset_attribution();
+        bad.add_node(ThreadId(3), NodeKind::UserThread);
+        // Node count differs but edge count is the same
+        assert!(!check_termination(&g, &bad));
+    }
+
+    #[test]
+    fn locality_detects_src_only_change() {
+        // Only src endpoint differs, dst is the same
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
+
+        let mut bad = WaitForGraph::new();
+        bad.add_node(ThreadId(3), NodeKind::UserThread);
+        bad.add_node(ThreadId(2), NodeKind::UserThread);
+        bad.add_edge(ThreadId(3), ThreadId(2), TimeWindow::new(0, 50));
+        assert!(!check_locality(&g, &bad));
+    }
+
+    #[test]
+    fn idempotency_actually_runs_cascade() {
+        use crate::cascade::engine::cascade_engine;
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_node(ThreadId(3), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 100));
+        g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(20, 100));
+
+        // Verify cascade actually changes attributed values
+        let result = cascade_engine(&g, Some(10));
+        let edges = result.all_edges();
+        let e12 = edges.iter().find(|(_, s, d, _)| *s == ThreadId(1) && *d == ThreadId(2)).unwrap();
+        assert_ne!(e12.3.attributed_delay_ms, e12.3.raw_wait_ms, "cascade must change attribution");
+
+        // Then verify idempotency
+        assert!(check_idempotency(&g, 10));
+    }
+
+    #[test]
+    fn depth_monotonicity_verified_numerically() {
+        use crate::cascade::engine::cascade_engine;
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_node(ThreadId(3), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 100));
+        g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(0, 100));
+
+        let shallow = cascade_engine(&g, Some(2));
+        let deep = cascade_engine(&g, Some(10));
+        // Deep cascade propagates more → less total attributed
+        assert!(deep.total_attributed() <= shallow.total_attributed());
+        assert!(check_depth_monotonicity(&g));
+    }
+
+    #[test]
     fn locality_detects_window_change() {
         let mut g = WaitForGraph::new();
         g.add_node(ThreadId(1), NodeKind::UserThread);
