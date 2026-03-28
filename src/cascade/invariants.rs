@@ -5,11 +5,42 @@
 
 use crate::graph::wfg::WaitForGraph;
 
-/// I-1: Weight Conservation.
-/// Sum of attributed_delay_ms must equal sum of raw_wait_ms.
-/// Uses exact u64 comparison — no floating-point tolerance.
-pub fn check_conservation(original: &WaitForGraph, result: &WaitForGraph) -> bool {
-    original.total_raw_wait() == result.total_attributed()
+/// I-1: Weight Conservation (production sentinel).
+///
+/// Checks I-2 (non-amplification) + I-7 (locality). This runs in ALL
+/// builds — it is the first line of defense against algorithm bugs.
+///
+/// Note: global sum equality (`Σ attributed == Σ raw`) does NOT hold
+/// after cascade redistribution. The cascade absorbs weight at
+/// intermediate nodes, so `total_attributed ≤ total_raw`. Per-edge
+/// non-amplification (I-2) is the correct conservation check.
+pub fn is_conserved(original: &WaitForGraph, result: &WaitForGraph) -> bool {
+    check_non_amplification(result) && check_locality(original, result)
+}
+
+/// I-1 enforcement: call after every cascade run.
+/// Panics in debug builds, logs warning in release builds.
+/// Returns the conservation status.
+pub fn assert_weight_conserved(original: &WaitForGraph, result: &WaitForGraph) -> bool {
+    let i2 = check_non_amplification(result);
+    let i7 = check_locality(original, result);
+    let conserved = i2 && i7;
+
+    if !conserved {
+        if cfg!(debug_assertions) {
+            panic!(
+                "I-1 VIOLATION: conservation check failed (I-2={}, I-7={})",
+                i2, i7
+            );
+        } else {
+            eprintln!(
+                "[wperf] WARNING: I-1 violation (I-2={}, I-7={})",
+                i2, i7
+            );
+        }
+    }
+
+    conserved
 }
 
 /// I-2: Non-amplification.
@@ -109,9 +140,51 @@ mod tests {
         g.add_node(ThreadId(2), NodeKind::UserThread);
         g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
 
-        // result = same graph (no cascade applied yet)
         let result = g.clone_with_reset_attribution();
-        assert!(check_conservation(&g, &result));
+        assert!(is_conserved(&g, &result));
+    }
+
+    #[test]
+    fn conservation_passes_on_cascade_result() {
+        use crate::cascade::engine::cascade_engine;
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_node(ThreadId(3), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 100));
+        g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(20, 100));
+
+        let result = cascade_engine(&g, None);
+        assert!(is_conserved(&g, &result));
+    }
+
+    #[test]
+    fn conservation_detects_amplification() {
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
+
+        let mut bad = g.clone_with_reset_attribution();
+        // Corrupt: set attributed > raw
+        let edges = bad.all_edges();
+        let eidx = edges[0].0;
+        bad.edge_weight_mut(eidx).attributed_delay_ms = 999;
+        assert!(!is_conserved(&g, &bad));
+    }
+
+    #[test]
+    fn conservation_detects_locality_violation() {
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
+
+        // Add an extra edge in result — violates locality
+        let mut bad = g.clone_with_reset_attribution();
+        bad.add_node(ThreadId(3), NodeKind::UserThread);
+        bad.add_edge(ThreadId(1), ThreadId(3), TimeWindow::new(0, 30));
+        assert!(!is_conserved(&g, &bad));
     }
 
     #[test]

@@ -2,6 +2,7 @@
 
 use serde::Serialize;
 
+use crate::cascade::invariants;
 use crate::graph::types::ThreadId;
 use crate::graph::wfg::WaitForGraph;
 
@@ -49,7 +50,7 @@ impl CascadeResult {
             graph_metrics: GraphMetrics {
                 total_raw_wait_ms: total_raw,
                 total_attributed_delay_ms: total_attr,
-                is_conserved: total_raw == total_attr,
+                is_conserved: invariants::is_conserved(original, result),
                 edge_count: result.edge_count(),
                 node_count: result.node_count(),
             },

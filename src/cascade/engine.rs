@@ -55,26 +55,16 @@ pub fn cascade_engine(graph: &WaitForGraph, max_depth: Option<u32>) -> WaitForGr
         result.edge_weight_mut(*eidx).attributed_delay_ms = *attributed;
     }
 
-    // I-2: Non-amplification — ALWAYS checked (production sentinel)
-    let all_valid = invariants::check_non_amplification(&result);
-    if !all_valid {
-        #[cfg(debug_assertions)]
-        panic!("I-2 VIOLATION: attributed > raw on some edge");
-    }
-
-    debug_assert!(
-        invariants::check_locality(graph, &result),
-        "I-7 VIOLATION: weight flows to non-adjacent node"
-    );
+    // I-1: Weight Conservation — production sentinel (always runs)
+    invariants::assert_weight_conserved(graph, &result);
 
     result
 }
 
-/// Check if the cascade result is conserved.
-/// Conservation means: for each edge, attributed + propagated == raw,
-/// and no attributed > raw (I-2). This is the production sentinel.
+/// Check if the cascade result is conserved (non-panicking).
+/// Delegates to invariants::is_conserved (I-2 + I-7).
 pub fn is_conserved(original: &WaitForGraph, result: &WaitForGraph) -> bool {
-    invariants::check_non_amplification(result) && invariants::check_locality(original, result)
+    invariants::is_conserved(original, result)
 }
 
 /// Recursive cascade computation (ADR-007 pseudocode).
