@@ -13,6 +13,7 @@ use super::types::*;
 /// The Wait-For Graph. Directed graph where:
 /// - Nodes = threads (or pseudo-threads)
 /// - Edges = "waiter → waitee" with time window and weight
+#[derive(Debug)]
 pub struct WaitForGraph {
     pub(crate) graph: DiGraph<NodeWeight, EdgeWeight>,
     pub(crate) node_map: BTreeMap<ThreadId, NodeIndex>,
