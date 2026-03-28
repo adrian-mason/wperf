@@ -1,8 +1,0 @@
-src/graph/wfg.rs:60:9: replace WaitForGraph::outgoing_edges -> Vec<(EdgeIndex, ThreadId, &EdgeWeight)> with vec![(Default::default(), Default::default(), Box::leak(Box::new(Default::default())))]
-src/graph/wfg.rs:68:9: replace WaitForGraph::incoming_edges -> Vec<(EdgeIndex, ThreadId, &EdgeWeight)> with vec![(Default::default(), Default::default(), Box::leak(Box::new(Default::default())))]
-src/graph/wfg.rs:77:9: replace WaitForGraph::all_edges -> Vec<(EdgeIndex, ThreadId, ThreadId, &EdgeWeight)> with vec![(Default::default(), Default::default(), Default::default(), Box::leak(Box::new(Default::default())))]
-src/graph/wfg.rs:50:9: replace WaitForGraph::thread_id -> ThreadId with Default::default()
-src/graph/wfg.rs:102:9: replace WaitForGraph::edge_weight -> &EdgeWeight with Box::leak(Box::new(Default::default()))
-src/graph/wfg.rs:107:9: replace WaitForGraph::edge_weight_mut -> &mut EdgeWeight with Box::leak(Box::new(Default::default()))
-src/graph/wfg.rs:112:9: replace WaitForGraph::node_weight -> &NodeWeight with Box::leak(Box::new(Default::default()))
-src/graph/sweep.rs:30:5: replace sweep_line_partition -> Vec<ElementaryInterval> with vec![Default::default()]
