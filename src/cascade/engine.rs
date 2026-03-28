@@ -58,6 +58,18 @@ pub fn cascade_engine(graph: &WaitForGraph, max_depth: Option<u32>) -> WaitForGr
     // I-1: Weight Conservation — production sentinel (always runs)
     invariants::assert_weight_conserved(graph, &result);
 
+    // I-3: Non-negativity (trivially true for u64, documents intent)
+    debug_assert!(
+        invariants::check_non_negativity(&result),
+        "I-3 VIOLATION: negative attributed delay"
+    );
+
+    // I-4: Termination (topology preserved)
+    debug_assert!(
+        invariants::check_termination(graph, &result),
+        "I-4 VIOLATION: cascade changed graph topology"
+    );
+
     result
 }
 

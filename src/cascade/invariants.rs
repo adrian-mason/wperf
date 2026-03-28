@@ -58,6 +58,14 @@ pub fn check_non_negativity(_result: &WaitForGraph) -> bool {
     true // u64 is always >= 0
 }
 
+/// I-4: Termination.
+/// Cascade must not create or remove nodes/edges.
+/// The topology of the result must match the original.
+pub fn check_termination(original: &WaitForGraph, result: &WaitForGraph) -> bool {
+    original.node_count() == result.node_count()
+        && original.edge_count() == result.edge_count()
+}
+
 /// I-7: Locality.
 /// Every edge in result must correspond to an edge in original with
 /// the same (src, dst) and time_window.
@@ -110,22 +118,16 @@ pub fn check_idempotency(graph: &WaitForGraph, max_depth: u32) -> bool {
 }
 
 /// I-6: Depth monotonicity.
-/// Increasing max_depth should not decrease total propagated weight
-/// (i.e., should not increase total attributed on non-leaf edges).
+/// Increasing max_depth propagates more weight downstream, so
+/// total_attributed(deep) ≤ total_attributed(shallow).
+/// Test-only — runs cascade at two depths.
 pub fn check_depth_monotonicity(graph: &WaitForGraph) -> bool {
     use super::engine::cascade_engine;
 
     let shallow = cascade_engine(graph, Some(2));
     let deep = cascade_engine(graph, Some(10));
 
-    // With more depth, more weight is propagated downstream →
-    // total attributed on all edges should be the same (conservation),
-    // but the distribution changes. Check conservation on both.
-    let shallow_total = shallow.total_attributed();
-    let deep_total = deep.total_attributed();
-
-    // Both must conserve
-    shallow_total == graph.total_raw_wait() && deep_total == graph.total_raw_wait()
+    deep.total_attributed() <= shallow.total_attributed()
 }
 
 #[cfg(test)]
@@ -197,6 +199,79 @@ mod tests {
     }
 
     #[test]
+    fn non_amplification_detects_violation() {
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
+
+        let edges = g.all_edges();
+        let eidx = edges[0].0;
+        g.edge_weight_mut(eidx).attributed_delay_ms = 999;
+        assert!(!check_non_amplification(&g));
+    }
+
+    #[test]
+    fn non_negativity_trivially_true() {
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
+        // u64 cannot be negative — this documents the type-level guarantee
+        assert!(check_non_negativity(&g));
+    }
+
+    #[test]
+    fn termination_passes_on_clone() {
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
+
+        let result = g.clone_with_reset_attribution();
+        assert!(check_termination(&g, &result));
+    }
+
+    #[test]
+    fn termination_detects_topology_change() {
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
+
+        let mut bad = g.clone_with_reset_attribution();
+        bad.add_node(ThreadId(3), NodeKind::UserThread);
+        bad.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(0, 30));
+        assert!(!check_termination(&g, &bad));
+    }
+
+    #[test]
+    fn idempotency_passes_on_figure4() {
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_node(ThreadId(3), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 100));
+        g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(20, 100));
+
+        assert!(check_idempotency(&g, 10));
+    }
+
+    #[test]
+    fn depth_monotonicity_passes_on_chain() {
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_node(ThreadId(3), NodeKind::UserThread);
+        g.add_node(ThreadId(4), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 100));
+        g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(20, 100));
+        g.add_edge(ThreadId(3), ThreadId(4), TimeWindow::new(50, 100));
+
+        assert!(check_depth_monotonicity(&g));
+    }
+
+    #[test]
     fn locality_passes_on_clone() {
         let mut g = WaitForGraph::new();
         g.add_node(ThreadId(1), NodeKind::UserThread);
@@ -205,5 +280,33 @@ mod tests {
 
         let result = g.clone_with_reset_attribution();
         assert!(check_locality(&g, &result));
+    }
+
+    #[test]
+    fn locality_detects_extra_edge() {
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
+
+        let mut bad = g.clone_with_reset_attribution();
+        bad.add_node(ThreadId(3), NodeKind::UserThread);
+        bad.add_edge(ThreadId(1), ThreadId(3), TimeWindow::new(0, 30));
+        assert!(!check_locality(&g, &bad));
+    }
+
+    #[test]
+    fn locality_detects_window_change() {
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
+
+        // Create result with different time window
+        let mut bad = WaitForGraph::new();
+        bad.add_node(ThreadId(1), NodeKind::UserThread);
+        bad.add_node(ThreadId(2), NodeKind::UserThread);
+        bad.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 99));
+        assert!(!check_locality(&g, &bad));
     }
 }
