@@ -32,7 +32,7 @@ Under `stress-ng --switch 128` (~8.6M events/sec, 32 CPUs):
 
 2. **Edge aggregation ≠ cascade redistribution.** Aggregation sums raw wait times; cascade recursively pushes blame to root causes. This is the fundamental insight enabling wPerf to find global bottlenecks (§11 of origin-analysis.md).
 
-3. **run_figure4.py as minimal oracle.** The 80-line Python 3 script implementing ADR-007 pseudocode can serve as a differential testing oracle for Phase 0 (#20), replacing the non-existent bottleneck.py cascade.
+3. **`tests/fixtures/cascade_oracle.py` for non-overlapping graph validation.** The Python 3 script implements ADR-007 cascade pseudocode but lacks sweep-line partition (BUG-3). Valid only for graphs where each node has at most one overlapping outgoing dependency per time slice; complex overlapping graphs must use the Rust sweep-line implementation + invariant assertions. (Restored from tag `archived/gate0-prototypes`.)
 
 4. **Buffer sizing is critical.** Default perf_event_array (256KB/CPU) drops 7.4% under extreme scheduler load. Production must use 1MB+/CPU for perfbuf or 16MB+ for ringbuf.
 

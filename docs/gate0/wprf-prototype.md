@@ -68,6 +68,6 @@ The `data_section_end_offset` field in the header is set to the byte position af
 
 1. **Footer-at-end works correctly.** The section table offset and metadata payload are written after all events. The header's `section_table_offset` points to the right place.
 
-2. **Forward compatibility via TLV.** Unknown `rec_type` values can be skipped by reading `length` bytes — tested implicitly by the strict type check in `read_tlv()`.
+2. **Forward compatibility via TLV (design-level).** The TLV format supports skipping unknown `rec_type` values by reading `length` bytes. The prototype's `read_tlv()` returns an error on unknown types rather than implementing skip-and-continue; full forward-compatibility skip logic is deferred to Phase 1 production reader.
 
 3. **No alignment issues.** The 23-byte BaseEvent is intentionally unaligned (no padding). All fields use `to_le_bytes()`/`from_le_bytes()` for portability. This matches the design spec's fixed-length approach.
