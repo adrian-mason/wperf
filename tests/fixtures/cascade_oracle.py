@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
 """
-Gate 0 Issue #8: Validate SCC decomposition and manually trace cascade
-redistribution on the OSDI'18 Figure 4 scenario.
+Gate 0: Cascade redistribution validation for LINEAR graphs only.
 
-Since bottleneck.py does NOT implement cascade redistribution (see
-origin-analysis.md), this script:
-1. Tests SCC/Knot detection using NetworkX (same algorithm as bottleneck.py)
-2. Manually implements the cascade redistribution from ADR-007 pseudocode
-3. Validates Figure 4 expected output: Network=80ms, Parser=20ms, total=100ms
+Scope limitation: this script does NOT implement sweep-line partition
+for overlapping outgoing edges (BUG-3 in ADR-007). It produces correct
+results ONLY for graphs where each node has at most one outgoing edge
+overlapping any given time window (linear chains, trees). For graphs
+with overlapping concurrent targets, the Rust production implementation
+(src/graph/sweep.rs) is authoritative.
+
+This script is a validation fixture, not a general-purpose differential
+testing oracle. Phase 0 differential testing (Issue #20) should restrict
+test inputs to non-overlapping topologies when comparing against this
+script, and rely on I-1/I-2 invariant assertions for complex graphs.
+
+Validates:
+1. SCC/Knot detection using NetworkX
+2. Cascade redistribution on linear/tree graphs (ADR-007 pseudocode)
+3. Figure 4 expected output: Network=80ms, Parser=20ms, total=100ms
 """
 
 import networkx as nx
