@@ -144,14 +144,19 @@ pub fn internal_edges<'a>(
     graph: &'a WaitForGraph,
     scc: &Scc,
 ) -> Vec<(ThreadId, ThreadId, &'a EdgeWeight)> {
-    let members: std::collections::BTreeSet<ThreadId> = scc.members.iter().copied().collect();
-
-    graph
-        .all_edges()
-        .into_iter()
-        .filter(|(_, src, dst, _)| members.contains(src) && members.contains(dst))
-        .map(|(_, src, dst, ew)| (src, dst, ew))
-        .collect()
+    let mut result = Vec::new();
+    for &src_tid in &scc.members {
+        let src_idx = graph
+            .node_index(&src_tid)
+            .expect("SCC member must exist in the graph");
+        for (_, dst_tid, ew) in graph.outgoing_edges(src_idx) {
+            // scc.members is sorted — binary_search avoids BTreeSet allocation
+            if scc.members.binary_search(&dst_tid).is_ok() {
+                result.push((src_tid, dst_tid, ew));
+            }
+        }
+    }
+    result
 }
 
 #[cfg(test)]
