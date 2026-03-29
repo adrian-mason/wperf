@@ -4,10 +4,10 @@ Gate 0: Cascade redistribution validation for LINEAR graphs only.
 
 Scope limitation: this script does NOT implement sweep-line partition
 for overlapping outgoing edges (BUG-3 in ADR-007). It produces correct
-results ONLY for graphs where each node has at most one outgoing edge
-overlapping any given time window (linear chains, trees). For graphs
-with overlapping concurrent targets, the Rust production implementation
-(src/graph/sweep.rs) is authoritative.
+results ONLY for graphs where each node has at most one overlapping
+outgoing dependency in any time slice (linear chains, simple non-
+overlapping topologies). For graphs with concurrent overlapping targets,
+the Rust production implementation (src/graph/sweep.rs) is authoritative.
 
 This script is a validation fixture, not a general-purpose differential
 testing oracle. Phase 0 differential testing (Issue #20) should restrict
