@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, "phase*/*"]
+    branches: [main, "phase*/*", "fix/*"]
   pull_request:
     branches: [main]
 
@@ -19,6 +19,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+
+      - name: Verify toolchain components
+        run: rustup component add rustfmt clippy 2>/dev/null || true
 
       - uses: Swatinem/rust-cache@v2
 

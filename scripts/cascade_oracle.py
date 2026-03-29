@@ -19,8 +19,23 @@ Output format:
 
 import json
 import sys
+from collections import defaultdict
 
 MAX_DEPTH = 10
+
+
+def build_graph(edge_list):
+    """Pre-process edge list into indexed lookup structures."""
+    outgoing = defaultdict(list)
+    incoming = defaultdict(list)
+    for src, dst, start, end in edge_list:
+        outgoing[src].append((dst, start, end))
+        incoming[dst].append((src, start, end))
+    return {
+        "edge_list": edge_list,
+        "outgoing": outgoing,
+        "incoming": incoming,
+    }
 
 
 def sweep_line_partition(outgoing, window_start, window_end):
@@ -58,13 +73,12 @@ def sweep_line_partition(outgoing, window_start, window_end):
 def count_concurrent_waiters(graph, target, w_start, w_end):
     """Count distinct threads waiting for target during [w_start, w_end)."""
     waiters = set()
-    for src, dst, e_start, e_end in graph["edge_list"]:
-        if dst == target:
-            # Check overlap
-            s = max(e_start, w_start)
-            e = min(e_end, w_end)
-            if s < e:
-                waiters.add(src)
+    for src, e_start, e_end in graph["incoming"].get(target, []):
+        # Check overlap
+        s = max(e_start, w_start)
+        e = min(e_end, w_end)
+        if s < e:
+            waiters.add(src)
     return max(len(waiters), 1)
 
 
@@ -73,11 +87,7 @@ def compute_cascade(graph, current, w_start, w_end, depth, path):
     if depth >= MAX_DEPTH or current in path:
         return 0
 
-    outgoing = [
-        (dst, e_start, e_end)
-        for src, dst, e_start, e_end in graph["edge_list"]
-        if src == current
-    ]
+    outgoing = graph["outgoing"].get(current, [])
 
     intervals = sweep_line_partition(outgoing, w_start, w_end)
     if not intervals:
@@ -129,13 +139,11 @@ def cascade_engine(graph):
 def main():
     data = json.load(sys.stdin)
 
-    # Build edge list
-    graph = {
-        "edge_list": [
-            (e["src"], e["dst"], e["start_ms"], e["end_ms"])
-            for e in data["edges"]
-        ]
-    }
+    edge_list = [
+        (e["src"], e["dst"], e["start_ms"], e["end_ms"])
+        for e in data["edges"]
+    ]
+    graph = build_graph(edge_list)
 
     results = cascade_engine(graph)
     # Sort for deterministic output

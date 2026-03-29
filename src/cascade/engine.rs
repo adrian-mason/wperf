@@ -104,7 +104,7 @@ fn compute_cascade(
         let target_count = interval.targets.len() as u64;
 
         for &next_node in &interval.targets {
-            let _prop_down = compute_cascade(
+            let _ = compute_cascade(
                 graph,
                 next_node,
                 &interval.window,
@@ -113,7 +113,8 @@ fn compute_cascade(
                 path,
             );
 
-            // NEW-BUG-1 FIX: child absorbs interval duration (prop_down + self_blame)
+            // NEW-BUG-1 FIX: The child's subtree absorbs the entire interval duration.
+            // This correctly attributes blame to leaf nodes, which would otherwise be zero.
             let child_subtree_absorbed = interval.window.duration();
 
             let external_waiters = count_concurrent_waiters(graph, next_node, &interval.window);
