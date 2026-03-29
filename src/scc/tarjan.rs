@@ -146,12 +146,17 @@ pub fn internal_edges<'a>(
 ) -> Vec<(ThreadId, ThreadId, &'a EdgeWeight)> {
     let members: std::collections::BTreeSet<ThreadId> = scc.members.iter().copied().collect();
 
-    graph
-        .all_edges()
-        .into_iter()
-        .filter(|(_, src, dst, _)| members.contains(src) && members.contains(dst))
-        .map(|(_, src, dst, ew)| (src, dst, ew))
-        .collect()
+    let mut result = Vec::new();
+    for &src_tid in &scc.members {
+        if let Some(src_idx) = graph.node_index(&src_tid) {
+            for (_, dst_tid, ew) in graph.outgoing_edges(src_idx) {
+                if members.contains(&dst_tid) {
+                    result.push((src_tid, dst_tid, ew));
+                }
+            }
+        }
+    }
+    result
 }
 
 #[cfg(test)]

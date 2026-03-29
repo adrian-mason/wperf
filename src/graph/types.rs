@@ -7,18 +7,24 @@ use serde::Serialize;
 use std::fmt;
 
 /// Thread identifier. Pure kernel tid (NOT packed tgid<<32|tid).
-/// Negative values represent pseudo-threads: -4=NIC, -5=Disk.
+/// Negative values represent pseudo-threads (see constants below).
 /// tgid is a Phase 1+ UI concern, not an algorithm input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 pub struct ThreadId(pub i64);
 
+/// Pseudo-thread IDs for non-thread entities in the Wait-For Graph.
+pub const NIC_TID: i64 = -4;
+pub const DISK_TID: i64 = -5;
+pub const HARDIRQ_TID: i64 = -15;
+pub const SOFTIRQ_TID: i64 = -16;
+
 impl fmt::Display for ThreadId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
-            -4 => write!(f, "NIC"),
-            -5 => write!(f, "Disk"),
-            -16 => write!(f, "SoftIRQ"),
-            -15 => write!(f, "HardIRQ"),
+            NIC_TID => write!(f, "NIC"),
+            DISK_TID => write!(f, "Disk"),
+            SOFTIRQ_TID => write!(f, "SoftIRQ"),
+            HARDIRQ_TID => write!(f, "HardIRQ"),
             id => write!(f, "T{id}"),
         }
     }
