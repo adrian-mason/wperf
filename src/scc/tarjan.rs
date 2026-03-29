@@ -148,11 +148,12 @@ pub fn internal_edges<'a>(
 
     let mut result = Vec::new();
     for &src_tid in &scc.members {
-        if let Some(src_idx) = graph.node_index(&src_tid) {
-            for (_, dst_tid, ew) in graph.outgoing_edges(src_idx) {
-                if members.contains(&dst_tid) {
-                    result.push((src_tid, dst_tid, ew));
-                }
+        let src_idx = graph
+            .node_index(&src_tid)
+            .expect("SCC member must exist in the graph");
+        for (_, dst_tid, ew) in graph.outgoing_edges(src_idx) {
+            if members.contains(&dst_tid) {
+                result.push((src_tid, dst_tid, ew));
             }
         }
     }
