@@ -23,8 +23,8 @@ impl fmt::Display for ThreadId {
         match self.0 {
             NIC_TID => write!(f, "NIC"),
             DISK_TID => write!(f, "Disk"),
-            SOFTIRQ_TID => write!(f, "SoftIRQ"),
             HARDIRQ_TID => write!(f, "HardIRQ"),
+            SOFTIRQ_TID => write!(f, "SoftIRQ"),
             id => write!(f, "T{id}"),
         }
     }
