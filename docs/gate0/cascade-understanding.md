@@ -177,4 +177,4 @@ This means softirq (-16), hardirq (-15), timer (-2), unknown (-99), and schedule
 
 2. **Weight conservation (I-1) is the critical safety net.** Since there's no reference to diff against, the invariant `Σ attributed == Σ raw_wait` is the strongest proof of correctness.
 
-3. **The Python test harness (`run_figure4.py`) can serve as a minimal oracle.** It implements the cascade from ADR-007 pseudocode in ~80 lines of Python. Phase 0's differential testing could compare Rust output against this script for simple scenarios.
+3. **The Python test harness (`tests/fixtures/cascade_oracle.py`) can serve as a minimal oracle.** It implements the cascade from ADR-007 pseudocode in ~80 lines of Python 3. Phase 0's differential testing could compare Rust output against this script for simple scenarios. (Originally `gate0/cascade-test/run_figure4.py`, preserved in tag `archived/gate0-prototypes`.)

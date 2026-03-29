@@ -62,7 +62,7 @@ Rust side (main.rs):
 
 ## Discoveries
 
-1. **3.3M events/sec throughput.** The system generated ~1.1M events/sec on this kernel. Production wPerf must handle this rate without drops.
+1. **~1.1M events/sec throughput.** The system generated 3.3M sched events in 3 seconds (~1.1M/sec). Production wPerf must handle this rate without drops.
 
 2. **Per-CPU ordering confirmed.** perf_event_array delivers events in per-CPU order (monotonic within CPU), confirming ADR-004's analysis. Cross-CPU reordering requires the Min-Heap Reorder Buffer in the perfarray path.
 
