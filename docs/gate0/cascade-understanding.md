@@ -61,7 +61,7 @@ compute_cascade(graph, current, window, depth, max_depth, path):
 
 | Property | Detail |
 |----------|--------|
-| **Weight conservation** | Σ attributed = Σ raw_wait (I-1 invariant) |
+| **Per-entry-edge conservation** | For each entry edge, Σ attributed across its cascade subtree = entry edge's raw_wait (I-1 invariant). Note: global Σ attributed ≠ Σ raw_wait under per-edge independent cascade — see [ADR-015](../decisions/ADR-015.md). |
 | **Proportional allocation** | When current node waits for N targets simultaneously, each gets 1/N |
 | **Cycle handling** | `path` set prevents infinite recursion; cycle node absorbs remaining blame |
 | **Depth limit** | `max_depth=10` prevents deep recursion; truncated branches absorb remaining weight |
@@ -175,6 +175,6 @@ This means softirq (-16), hardirq (-15), timer (-2), unknown (-99), and schedule
 
 1. **Cascade has no oracle.** Differential testing (Issue #20) cannot compare against bottleneck.py. The ADR-007 pseudocode and manual traces (like Figure 4 above) are the only validation sources.
 
-2. **Weight conservation (I-1) is the critical safety net.** Since there's no reference to diff against, the invariant `Σ attributed == Σ raw_wait` is the strongest proof of correctness.
+2. **Per-entry-edge conservation (I-1) is the critical safety net.** Since there's no reference to diff against, the invariant "for each entry edge, Σ attributed across its cascade subtree == entry edge's raw_wait" is the strongest proof of correctness. Note: global Σ attributed ≠ Σ raw_wait — this is a mathematical property of per-edge independent cascade, not a bug (see [ADR-015](../decisions/ADR-015.md)).
 
 3. **The Python validation script (`tests/fixtures/cascade_oracle.py`) covers non-overlapping graphs only.** It implements the cascade from ADR-007 pseudocode but lacks sweep-line partition (BUG-3). Valid only for graphs where each node has at most one overlapping outgoing dependency per time slice. Phase 0's differential testing (#20) should restrict comparisons to such topologies; complex graphs must rely on I-1/I-2 invariant assertions in the Rust implementation. (Originally `gate0/cascade-test/run_figure4.py`, preserved in tag `archived/gate0-prototypes`.)
