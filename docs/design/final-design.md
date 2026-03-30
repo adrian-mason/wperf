@@ -416,14 +416,14 @@ This ensures users can calibrate their confidence in the analysis based on empir
 | **L1: Invariant Assertions** | I-1 through I-7 as `debug_assert!` | Day 1 | 100% of cascade runs |
 | **L2: Paper Scenarios + Regressions** | Figure 4 + 5 known bug regressions | Week 1 | 10+ hardcoded test cases |
 | **L3: Property-Based Testing** | proptest random graph generation | Week 2 | 10,000+ random topologies |
-| **L4: Differential Testing** | Rust vs Python bottleneck.py oracle | Week 2-3 | ≤1.0ms tolerance |
+| **L4: Differential Testing** | Rust vs Python cascade oracle (`cascade_oracle.py`, ADR-007 pseudocode) | Week 2-3 | ≤1.0ms tolerance |
 | **L5: Mutation Testing** | cargo-mutants kill rate | Week 3 | ≥90% mutation detection |
 
 ### 6.2 Weight Conservation + Invariants
 
-I-1 (weight conservation) is the single strongest correctness check — it catches 4 of 5 known bugs discovered during pseudocode review. Implementation: ~20 lines in `assert_weight_conserved()`.
+I-1 (per-entry-edge conservation) is the single strongest correctness check — it catches 4 of 5 known bugs discovered during pseudocode review. Implementation: ~20 lines in `assert_entry_edge_conserved()`. See [ADR-015](../decisions/ADR-015.md).
 
-Invariant I-7 (locality) complements I-1 by catching path traversal errors where weight flows to non-adjacent nodes — a class of bug that I-1 alone cannot detect. It must be enforced alongside I-1 through I-6.
+Invariant I-7 (locality) complements I-1 by catching path traversal errors where weight flows to non-adjacent nodes — a class of bug that I-1 alone cannot detect. It must be enforced alongside I-1 through I-7.
 
 ### 6.3 Four Paper Scenarios
 
@@ -436,12 +436,13 @@ Invariant I-7 (locality) complements I-1 by catching path traversal errors where
 
 ### 6.4 Differential Testing + Common-Mode Mitigation
 
-The Python reference implementation (bottleneck.py, ~808 lines from the original wPerf repository) serves as an oracle for differential testing. The same synthetic input graph (constructed entirely in userspace without BPF dependencies, per the [ADR-011](../decisions/ADR-011.md) Phase 0 isolation constraint) is processed by both Rust and Python implementations; results must agree within ≤1.0ms tolerance (floating-point precision).
+The Python cascade oracle (`cascade_oracle.py`, implementing the ADR-007 pseudocode independently) serves as the differential testing reference. Note: the original wPerf repository's `bottleneck.py` does NOT implement cascade redistribution — it is an interactive SCC visualization tool that reads pre-aggregated edge weights (see Gate 0 finding, [cascade-understanding.md](../gate0/cascade-understanding.md) §1). The same synthetic input graph (constructed entirely in userspace without BPF dependencies, per the [ADR-011](../decisions/ADR-011.md) Phase 0 isolation constraint) is processed by both Rust and Python implementations; results must agree within ≤1.0ms tolerance (floating-point precision).
 
-**Common-mode failure risk:** Both implementations could share the same conceptual misunderstanding of the paper. Mitigation:
+**Common-mode failure risk:** Both implementations derive from the same ADR-007 pseudocode, so they could share the same conceptual error. Mitigation:
 - Cross-reference with the OSDI'18 paper's Figure 4 expected outputs (independent ground truth)
+- Per-entry-edge conservation (I-1) and other invariants provide independent structural verification
 - Test with adversarial inputs designed to expose specific algorithm edge cases
-- Document any divergences between the Python reference and our interpretation
+- The Python oracle is restricted to non-overlapping graphs (no sweep-line partition); complex topologies rely on I-1/I-2 invariant assertions in the Rust implementation (see [cascade-understanding.md](../gate0/cascade-understanding.md) §6.3)
 
 ### 6.5 Mutation Testing
 
@@ -479,7 +480,7 @@ Three throwaway prototypes validate high-risk assumptions before any production 
 | Prototype | Validates | Pass Criteria | Failure Means |
 |-----------|----------|---------------|---------------|
 | **A: eBPF Minimal Collection** | sched_switch + sched_wakeup can capture matching event pairs on the host kernel | Event pairs match by TID for a 2-thread mutex workload | Toolchain or kernel issue — Phase 1 cannot start |
-| **B: Python Cascade** | Complete understanding of bottleneck.py 808-line logic | Figure 4 output matches paper exactly (Network=80ms, Parser=20ms, total=100ms) | Cascade understanding is wrong — Rust implementation would diverge |
+| **B: Python Cascade** | Complete understanding of the paper's cascade redistribution algorithm | Figure 4 output matches paper exactly (Network=80ms, Parser=20ms, per-entry-edge conservation: 20+80=100ms, [ADR-015](../decisions/ADR-015.md)) | Cascade understanding is wrong — Rust implementation would diverge |
 | **C: wPRF Roundtrip** | 64B header + TLV can serialize/deserialize/crash-recover | 10-event roundtrip + truncation recovery of first N events | Format spec has ambiguity — fix before coding |
 
 ### 7.2 Phase 0–3 Detailed Timeline
