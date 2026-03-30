@@ -102,7 +102,7 @@ This is resolved by the CO-RE compiler at load time with zero runtime overhead.
 | `Knot` | A Sink SCC (out-degree 0 in Condensation DAG) containing ≥1 user thread. Represents a true systemic bottleneck or deadlock cycle. |
 | `Pseudo-thread` | A synthetic graph node representing a non-schedulable subsystem (e.g., disk I/O, softirq) for unified graph attribution. |
 | `Spurious Wakeup` | A wakeup where the thread runs for < 50μs before sleeping again. Filtered out as noise edges. |
-| `is_conserved` | Boolean flag: true when total `attributed_delay` equals total `raw_wait` (Invariant I-1 holds). |
+| `is_conserved` | Boolean flag: true when per-entry-edge conservation holds — for each entry edge, the sum of `attributed_delay` across its cascade subtree equals the entry edge's `raw_wait` (Invariant I-1). See §3.4 and [ADR-015](../decisions/ADR-015.md). |
 
 ---
 
@@ -241,7 +241,7 @@ The cascade algorithm redistributes wait time from direct waiters to root-cause 
 
 | ID | Invariant | What It Catches |
 |----|-----------|----------------|
-| **I-1** | Weight conservation: Σ(attributed_delay) == Σ(raw_wait) | BUG-2, BUG-3, BUG-4, NEW-BUG-1 |
+| **I-1** | Per-entry-edge conservation: for each entry edge, Σ(attributed_delay) across its cascade subtree == entry edge's raw_wait. Note: global Σ(attributed_delay) ≠ Σ(raw_wait) under per-edge independent cascade — see [ADR-015](../decisions/ADR-015.md). | BUG-2, BUG-3, BUG-4, NEW-BUG-1 |
 | **I-2** | Non-amplification: no node's attributed_delay > sum of its incoming raw_wait | Double-counting errors |
 | **I-3** | Non-negativity: all attributed_delay ≥ 0 | Sign errors in redistribution |
 | **I-4** | Termination: cascade completes within bounded steps | Infinite recursion from cycle handling bugs |
@@ -249,9 +249,11 @@ The cascade algorithm redistributes wait time from direct waiters to root-cause 
 | **I-6** | Depth monotonicity: deeper recursion redistributes less weight | Incorrect proportional allocation |
 | **I-7** | Locality: weight flows only along existing edges, bounded by time window intersection | Path traversal errors (BUG-1 class) |
 
-I-1 alone catches 4 of 5 known bugs discovered during pseudocode review — it is the highest-ROI invariant and must be implemented on Day 1 (~20 lines of code).
+I-1 alone catches 4 of 5 known bugs discovered during pseudocode review — it is the highest-ROI invariant and must be implemented on Day 1.
 
-While I-2 through I-7 are enforced via `debug_assert!` only (stripped in release builds to avoid performance overhead — e.g., I-5 idempotency requires running cascade twice), **I-1 (Weight conservation) is additionally validated at runtime in release mode** and exported as the `is_conserved` boolean flag in the final JSON output, serving as the production-level sentinel per [ADR-007](../decisions/ADR-007.md).
+**Clarification (ADR-015):** I-1 checks **per-entry-edge conservation**, not global sum equality. Under per-edge independent cascade, each edge is cascaded independently: `attributed = raw - propagated_downstream`. The propagated weight is subtracted from the entry edge but is NOT added to downstream edges (they have their own independent cascade). Therefore `Σ(attributed_delay)` across all edges is strictly less than `Σ(raw_wait)`. However, for each entry edge, the sum of attributed delays across its cascade subtree exactly equals the entry edge's `raw_wait`. This per-entry-edge conservation is the correct I-1 invariant. See [ADR-015](../decisions/ADR-015.md) for the full rationale and Figure 4 proof.
+
+While I-2 through I-7 are enforced via `debug_assert!` only (stripped in release builds to avoid performance overhead — e.g., I-5 idempotency requires running cascade twice), **I-1 (per-entry-edge conservation) is additionally validated at runtime in release mode** and exported as the `is_conserved` boolean flag in the final JSON output, serving as the production-level sentinel per [ADR-007](../decisions/ADR-007.md).
 
 ### 3.5 Tarjan SCC + Condensation + Knot Detection
 
@@ -396,7 +398,7 @@ Stack traces collected via bpf_get_stackid are rendered as interactive SVG flame
 
 To satisfy the transparency requirements of [ADR-012](../decisions/ADR-012.md) and the production sentinel of [ADR-007](../decisions/ADR-007.md), the HTML report **must** include a prominent health dashboard displaying:
 
-- **Algorithm health:** `is_conserved` boolean flag — a `false` value indicates a Cascade Engine bug and the results should not be trusted
+- **Algorithm health:** `is_conserved` boolean flag — verifies per-entry-edge conservation (I-1). A `false` value indicates a Cascade Engine bug and the results should not be trusted
 - **Data completeness metrics:** `drop_count`, `unmatched_wakeup_count`, `partial_stack_count`, `cascade_depth_truncation_count`, `false_wakeup_filtered_count`
 
 This ensures users can calibrate their confidence in the analysis based on empirical data quality, rather than relying on an unverifiable guarantee.
@@ -414,14 +416,14 @@ This ensures users can calibrate their confidence in the analysis based on empir
 | **L1: Invariant Assertions** | I-1 through I-7 as `debug_assert!` | Day 1 | 100% of cascade runs |
 | **L2: Paper Scenarios + Regressions** | Figure 4 + 5 known bug regressions | Week 1 | 10+ hardcoded test cases |
 | **L3: Property-Based Testing** | proptest random graph generation | Week 2 | 10,000+ random topologies |
-| **L4: Differential Testing** | Rust vs Python bottleneck.py oracle | Week 2-3 | ≤1.0ms tolerance |
+| **L4: Differential Testing** | Rust vs Python cascade oracle (`cascade_oracle.py`, ADR-007 pseudocode) | Week 2-3 | ≤1.0ms tolerance |
 | **L5: Mutation Testing** | cargo-mutants kill rate | Week 3 | ≥90% mutation detection |
 
 ### 6.2 Weight Conservation + Invariants
 
-I-1 (weight conservation) is the single strongest correctness check — it catches 4 of 5 known bugs discovered during pseudocode review. Implementation: ~20 lines in `assert_weight_conserved()`.
+I-1 (per-entry-edge conservation) is the single strongest correctness check — it catches 4 of 5 known bugs discovered during pseudocode review. Implementation: ~20 lines in `assert_entry_edge_conserved()`. See [ADR-015](../decisions/ADR-015.md).
 
-Invariant I-7 (locality) complements I-1 by catching path traversal errors where weight flows to non-adjacent nodes — a class of bug that I-1 alone cannot detect. It must be enforced alongside I-1 through I-6.
+Invariant I-7 (locality) complements I-1 by catching path traversal errors where weight flows to non-adjacent nodes — a class of bug that I-1 alone cannot detect. It must be enforced alongside I-1 through I-7.
 
 ### 6.3 Four Paper Scenarios
 
@@ -434,12 +436,13 @@ Invariant I-7 (locality) complements I-1 by catching path traversal errors where
 
 ### 6.4 Differential Testing + Common-Mode Mitigation
 
-The Python reference implementation (bottleneck.py, ~808 lines from the original wPerf repository) serves as an oracle for differential testing. The same synthetic input graph (constructed entirely in userspace without BPF dependencies, per the [ADR-011](../decisions/ADR-011.md) Phase 0 isolation constraint) is processed by both Rust and Python implementations; results must agree within ≤1.0ms tolerance (floating-point precision).
+The Python cascade oracle (`cascade_oracle.py`, implementing the ADR-007 pseudocode independently) serves as the differential testing reference. Note: the original wPerf repository's `bottleneck.py` does NOT implement cascade redistribution — it is an interactive SCC visualization tool that reads pre-aggregated edge weights (see Gate 0 finding, [cascade-understanding.md](../gate0/cascade-understanding.md) §1). The same synthetic input graph (constructed entirely in userspace without BPF dependencies, per the [ADR-011](../decisions/ADR-011.md) Phase 0 isolation constraint) is processed by both Rust and Python implementations; results must agree within ≤1.0ms tolerance (floating-point precision).
 
-**Common-mode failure risk:** Both implementations could share the same conceptual misunderstanding of the paper. Mitigation:
+**Common-mode failure risk:** Both implementations derive from the same ADR-007 pseudocode, so they could share the same conceptual error. Mitigation:
 - Cross-reference with the OSDI'18 paper's Figure 4 expected outputs (independent ground truth)
+- Per-entry-edge conservation (I-1) and other invariants provide independent structural verification
 - Test with adversarial inputs designed to expose specific algorithm edge cases
-- Document any divergences between the Python reference and our interpretation
+- The Python oracle is restricted to non-overlapping graphs (no sweep-line partition); complex topologies rely on I-1/I-2 invariant assertions in the Rust implementation (see [cascade-understanding.md](../gate0/cascade-understanding.md) §6.3)
 
 ### 6.5 Mutation Testing
 
@@ -477,7 +480,7 @@ Three throwaway prototypes validate high-risk assumptions before any production 
 | Prototype | Validates | Pass Criteria | Failure Means |
 |-----------|----------|---------------|---------------|
 | **A: eBPF Minimal Collection** | sched_switch + sched_wakeup can capture matching event pairs on the host kernel | Event pairs match by TID for a 2-thread mutex workload | Toolchain or kernel issue — Phase 1 cannot start |
-| **B: Python Cascade** | Complete understanding of bottleneck.py 808-line logic | Figure 4 output matches paper exactly (Network=80ms, Parser=20ms, total=100ms) | Cascade understanding is wrong — Rust implementation would diverge |
+| **B: Python Cascade** | Complete understanding of the paper's cascade redistribution algorithm | Figure 4 output matches paper exactly (Network=80ms, Parser=20ms, per-entry-edge conservation: 20+80=100ms, [ADR-015](../decisions/ADR-015.md)) | Cascade understanding is wrong — Rust implementation would diverge |
 | **C: wPRF Roundtrip** | 64B header + TLV can serialize/deserialize/crash-recover | 10-event roundtrip + truncation recovery of first N events | Format spec has ambiguity — fix before coding |
 
 ### 7.2 Phase 0–3 Detailed Timeline
@@ -516,7 +519,7 @@ Phase 3 (Stack Collection + Production HTML)    Weeks 13–16
 | Gate | Must-Pass Criteria | Method |
 |------|-------------------|--------|
 | **Gate 0** | A: matched switch/wakeup pairs; B: Figure 4 exact match; C: 10-event roundtrip + truncation recovery | Manual |
-| **Phase 0** | `assert_weight_conserved()` 0 violations; 5 bug regressions pass; proptest 10K, 0 violations; vs Python ≤1.0ms; mutation ≥90% | **Automated** |
+| **Phase 0** | `assert_entry_edge_conserved()` 0 violations (per-entry-edge conservation, ADR-015); 5 bug regressions pass; proptest 10K, 0 violations; vs Python ≤1.0ms; mutation ≥90% | **Automated** |
 | **Phase 1** | 2-thread mutex Knot detected; `is_conserved==true` on real BPF data; all 5 coverage metrics exported in JSON; overhead <3% CPU (stress-ng 64 threads); crash recovery passes; minimal SVG readable | Automated + manual review |
 | **Phase 2a** | Correct futex wait_type annotation; spurious wakeups filtered; `is_conserved` preserved | Automated |
 | **Phase 2b** | IO pseudo-thread `attributed_delay ≥ 70%`; no spurious Knots from synthetic edges; `is_conserved` preserved | Automated + manual review |
