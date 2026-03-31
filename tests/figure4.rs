@@ -3,7 +3,8 @@
 //! These are the fundamental correctness tests — if these fail,
 //! the cascade engine is broken.
 
-use wperf::cascade::engine::{cascade_engine, is_conserved};
+use wperf::cascade::engine::cascade_engine;
+use wperf::cascade::invariants::is_conserved;
 use wperf::graph::types::*;
 use wperf::graph::wfg::WaitForGraph;
 use wperf::output::CascadeResult;
@@ -23,7 +24,7 @@ fn figure4_graph() -> WaitForGraph {
 #[test]
 fn figure4_attributed_values() {
     let g = figure4_graph();
-    let result = cascade_engine(&g, None);
+    let result = cascade_engine(&g, None).unwrap();
     let edges = result.all_edges();
 
     let user_parser = edges
@@ -49,7 +50,7 @@ fn figure4_attributed_values() {
 #[test]
 fn figure4_root_edge_conservation() {
     let g = figure4_graph();
-    let result = cascade_engine(&g, None);
+    let result = cascade_engine(&g, None).unwrap();
     let edges = result.all_edges();
 
     let user_parser = edges
@@ -73,14 +74,14 @@ fn figure4_root_edge_conservation() {
 #[test]
 fn figure4_invariants_hold() {
     let g = figure4_graph();
-    let result = cascade_engine(&g, None);
-    assert!(is_conserved(&g, &result), "I-1 sentinel must pass");
+    let result = cascade_engine(&g, None).unwrap();
+    assert!(is_conserved(&result), "I-1 sentinel must pass");
 }
 
 #[test]
 fn figure4_json_output() {
     let g = figure4_graph();
-    let result = cascade_engine(&g, None);
+    let result = cascade_engine(&g, None).unwrap();
     let output = CascadeResult::from_graph(&g, &result);
 
     assert!(output.graph_metrics.is_conserved);
@@ -104,7 +105,7 @@ fn extended_chain_attributed_values() {
     g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(20, 100));
     g.add_edge(ThreadId(3), ThreadId(4), TimeWindow::new(50, 100));
 
-    let result = cascade_engine(&g, None);
+    let result = cascade_engine(&g, None).unwrap();
     let edges = result.all_edges();
 
     let up = edges
@@ -131,7 +132,7 @@ fn extended_chain_attributed_values() {
     let total = up.3.attributed_delay_ms + pn.3.attributed_delay_ms + nd.3.attributed_delay_ms;
     assert_eq!(total, 100);
 
-    assert!(is_conserved(&g, &result));
+    assert!(is_conserved(&result));
 }
 
 /// Single edge: leaf node gets full attribution.
@@ -142,10 +143,10 @@ fn single_edge_full_attribution() {
     g.add_node(ThreadId(2), NodeKind::UserThread);
     g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
 
-    let result = cascade_engine(&g, None);
+    let result = cascade_engine(&g, None).unwrap();
     let edges = result.all_edges();
     assert_eq!(edges[0].3.attributed_delay_ms, 50);
-    assert!(is_conserved(&g, &result));
+    assert!(is_conserved(&result));
 }
 
 /// Disconnected components: each edge is independent.
@@ -159,7 +160,7 @@ fn disconnected_edges() {
     g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
     g.add_edge(ThreadId(3), ThreadId(4), TimeWindow::new(0, 80));
 
-    let result = cascade_engine(&g, None);
+    let result = cascade_engine(&g, None).unwrap();
     let edges = result.all_edges();
 
     let e1 = edges
@@ -174,5 +175,5 @@ fn disconnected_edges() {
     // Both are leaf edges — full attribution
     assert_eq!(e1.3.attributed_delay_ms, 50);
     assert_eq!(e2.3.attributed_delay_ms, 80);
-    assert!(is_conserved(&g, &result));
+    assert!(is_conserved(&result));
 }

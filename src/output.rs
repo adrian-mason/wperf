@@ -50,7 +50,7 @@ impl CascadeResult {
             graph_metrics: GraphMetrics {
                 total_raw_wait_ms: total_raw,
                 total_attributed_delay_ms: total_attr,
-                is_conserved: invariants::is_conserved(original, result),
+                is_conserved: invariants::is_conserved(result),
                 edge_count: result.edge_count(),
                 node_count: result.node_count(),
             },
