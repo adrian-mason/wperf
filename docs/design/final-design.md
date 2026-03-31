@@ -102,7 +102,7 @@ This is resolved by the CO-RE compiler at load time with zero runtime overhead.
 | `Knot` | A Sink SCC (out-degree 0 in Condensation DAG) containing ≥1 user thread. Represents a true systemic bottleneck or deadlock cycle. |
 | `Pseudo-thread` | A synthetic graph node representing a non-schedulable subsystem (e.g., disk I/O, softirq) for unified graph attribution. |
 | `Spurious Wakeup` | A wakeup where the thread runs for < 50μs before sleeping again. Filtered out as noise edges. |
-| `is_conserved` | Boolean flag: true when per-entry-edge conservation holds — for each entry edge, the sum of `attributed_delay` across its cascade subtree equals the entry edge's `raw_wait` (Invariant I-1). See §3.4 and [ADR-015](../decisions/ADR-015.md). |
+| `invariants_ok` | Boolean flag: true when structural postconditions hold — I-2 (non-amplification: `attributed ≤ raw` per edge) ∧ I-7 (locality: topology preserved). This is a structural guard, not a bug detector. See §3.4 and [ADR-016](../decisions/ADR-016.md). Replaces the deprecated `is_conserved` field. |
 
 ---
 
@@ -237,23 +237,22 @@ The cascade algorithm redistributes wait time from direct waiters to root-cause 
 - Maximum recursion depth of 10 (practical limit for real workloads); if exceeded, the branch is truncated and `cascade_depth_truncation_count` is incremented
 - Complexity: O(E × D × log K) where D=recursion depth ≤10, K=concurrent holders typically <5, effectively near-linear
 
-**Seven invariants** enforced via `debug_assert!` after every cascade run:
+**Six invariants** enforced after every cascade run (see [ADR-016](../decisions/ADR-016.md) for I-1 retirement and I-6 narrowing):
 
-| ID | Invariant | What It Catches |
-|----|-----------|----------------|
-| **I-1** | Per-entry-edge conservation: for each entry edge, Σ(attributed_delay) across its cascade subtree == entry edge's raw_wait. Note: global Σ(attributed_delay) ≠ Σ(raw_wait) under per-edge independent cascade — see [ADR-015](../decisions/ADR-015.md). | BUG-2, BUG-3, BUG-4, NEW-BUG-1 |
-| **I-2** | Non-amplification: no node's attributed_delay > sum of its incoming raw_wait | Double-counting errors |
-| **I-3** | Non-negativity: all attributed_delay ≥ 0 | Sign errors in redistribution |
-| **I-4** | Termination: cascade completes within bounded steps | Infinite recursion from cycle handling bugs |
-| **I-5** | Idempotency: running cascade twice produces identical results | Non-deterministic state leaks |
-| **I-6** | Depth monotonicity: deeper recursion redistributes less weight | Incorrect proportional allocation |
-| **I-7** | Locality: weight flows only along existing edges, bounded by time window intersection | Path traversal errors (BUG-1 class) |
+| ID | Invariant | What It Catches | Scope |
+|----|-----------|----------------|-------|
+| **I-2** | Non-amplification: no edge's attributed_delay > its raw_wait | Double-counting errors | All graphs |
+| **I-3** | Non-negativity: all attributed_delay ≥ 0 | Sign errors in redistribution | All graphs |
+| **I-4** | Termination: cascade completes within bounded steps | Infinite recursion from cycle handling bugs | All graphs |
+| **I-5** | Idempotency: running cascade twice produces identical results | Non-deterministic state leaks | All graphs |
+| **I-6** | Depth monotonicity: deeper recursion redistributes less weight | Incorrect proportional allocation | **Simple chains only** |
+| **I-7** | Locality: weight flows only along existing edges, bounded by time window intersection | Path traversal errors (BUG-1 class) | All graphs |
 
-I-1 alone catches 4 of 5 known bugs discovered during pseudocode review — it is the highest-ROI invariant and must be implemented on Day 1.
+**I-1 (conservation) retired ([ADR-016](../decisions/ADR-016.md)):** The per-entry-edge subtree-sum conservation definition from [ADR-015](../decisions/ADR-015.md) was proven incorrect for fan-out graphs. Per-edge independent cascade has no cross-edge conservation invariant — each edge is cascaded independently with no shared conservation pool.
 
-**Clarification (ADR-015):** I-1 checks **per-entry-edge conservation**, not global sum equality. Under per-edge independent cascade, each edge is cascaded independently: `attributed = raw - propagated_downstream`. The propagated weight is subtracted from the entry edge but is NOT added to downstream edges (they have their own independent cascade). Therefore `Σ(attributed_delay)` across all edges is strictly less than `Σ(raw_wait)`. However, for each entry edge, the sum of attributed delays across its cascade subtree exactly equals the entry edge's `raw_wait`. This per-entry-edge conservation is the correct I-1 invariant. See [ADR-015](../decisions/ADR-015.md) for the full rationale and Figure 4 proof.
+**I-6 qualified ([ADR-016](../decisions/ADR-016.md)):** Depth monotonicity holds only for simple chains (no fan-out, no concurrent waiters). With fan-out, integer division in proportional allocation causes `child_absorbed < window.duration()`, so deeper recursion may propagate less weight than the truncation base case. I-6 is verified by unit tests on simple chains and excluded from property-based testing on random graphs.
 
-While I-2 through I-7 are enforced via `debug_assert!` only (stripped in release builds to avoid performance overhead — e.g., I-5 idempotency requires running cascade twice), **I-1 (per-entry-edge conservation) is additionally validated at runtime in release mode** and exported as the `is_conserved` boolean flag in the final JSON output, serving as the production-level sentinel per [ADR-007](../decisions/ADR-007.md).
+**Production sentinel:** The `invariants_ok` boolean flag (I-2 ∧ I-7) is validated at runtime in ALL builds (release + debug) and exported in JSON output, serving as the production-level structural postcondition guard per [ADR-007](../decisions/ADR-007.md) and [ADR-016](../decisions/ADR-016.md). **Limitation:** I-2 is unfalsifiable by construction through the current cascade path (`attributed = raw_wait.saturating_sub(propagated)` guarantees `attributed ≤ raw`). The sentinel catches 0/5 known bugs — its value is defense-in-depth against future regressions, not bug detection. Known-bug coverage comes from the full verification stack (regression tests, proptest, differential oracle, mutation testing). I-3 and I-4 are enforced via `debug_assert!` only (stripped in release builds). I-5 (idempotency) requires running cascade twice and is checked in debug builds only.
 
 ### 3.5 Tarjan SCC + Condensation + Knot Detection
 
@@ -398,7 +397,7 @@ Stack traces collected via bpf_get_stackid are rendered as interactive SVG flame
 
 To satisfy the transparency requirements of [ADR-012](../decisions/ADR-012.md) and the production sentinel of [ADR-007](../decisions/ADR-007.md), the HTML report **must** include a prominent health dashboard displaying:
 
-- **Algorithm health:** `is_conserved` boolean flag — verifies per-entry-edge conservation (I-1). A `false` value indicates a Cascade Engine bug and the results should not be trusted
+- **Algorithm health:** `invariants_ok` boolean flag — structural postcondition guard (I-2 non-amplification ∧ I-7 locality). A `false` value indicates a Cascade Engine structural violation and the results should not be trusted. See [ADR-016](../decisions/ADR-016.md)
 - **Data completeness metrics:** `drop_count`, `unmatched_wakeup_count`, `partial_stack_count`, `cascade_depth_truncation_count`, `false_wakeup_filtered_count`
 
 This ensures users can calibrate their confidence in the analysis based on empirical data quality, rather than relying on an unverifiable guarantee.
@@ -519,10 +518,10 @@ Phase 3 (Stack Collection + Production HTML)    Weeks 13–16
 | Gate | Must-Pass Criteria | Method |
 |------|-------------------|--------|
 | **Gate 0** | A: matched switch/wakeup pairs; B: Figure 4 exact match; C: 10-event roundtrip + truncation recovery | Manual |
-| **Phase 0** | `assert_entry_edge_conserved()` 0 violations (per-entry-edge conservation, ADR-015); 5 bug regressions pass; proptest 10K, 0 violations; vs Python ≤1.0ms; mutation ≥90% | **Automated** |
-| **Phase 1** | 2-thread mutex Knot detected; `is_conserved==true` on real BPF data; all 5 coverage metrics exported in JSON; overhead <3% CPU (stress-ng 64 threads); crash recovery passes; minimal SVG readable | Automated + manual review |
-| **Phase 2a** | Correct futex wait_type annotation; spurious wakeups filtered; `is_conserved` preserved | Automated |
-| **Phase 2b** | IO pseudo-thread `attributed_delay ≥ 70%`; no spurious Knots from synthetic edges; `is_conserved` preserved | Automated + manual review |
+| **Phase 0** | `invariants_ok` (I-2 ∧ I-7) 0 violations on all test graphs; I-2 through I-5, I-7 verified by 10K proptest with 0 violations; I-6 verified by unit tests on simple chains; 5 bug regressions pass; vs Python ≤1.0ms (6 fixed scenarios); mutation ≥90% ([ADR-016](../decisions/ADR-016.md)) | **Automated** |
+| **Phase 1** | 2-thread mutex Knot detected; `invariants_ok==true` on real BPF data; all 5 coverage metrics exported in JSON; overhead <3% CPU (stress-ng 64 threads); crash recovery passes; minimal SVG readable | Automated + manual review |
+| **Phase 2a** | Correct futex wait_type annotation; spurious wakeups filtered; `invariants_ok` preserved | Automated |
+| **Phase 2b** | IO pseudo-thread `attributed_delay ≥ 70%`; no spurious Knots from synthetic edges; `invariants_ok` preserved | Automated + manual review |
 | **Phase 3** | Stack depth ≥ 5 frames (with FP); Dagre layout renders; flamegraph functions readable; total overhead < 5% CPU | Automated + manual |
 
 ### 7.4 Three Prohibitions + Rollback Strategy
