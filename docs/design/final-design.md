@@ -412,17 +412,17 @@ This ensures users can calibrate their confidence in the analysis based on empir
 
 | Layer | What | When | Target |
 |-------|------|------|--------|
-| **L1: Invariant Assertions** | I-1 through I-7 as `debug_assert!` | Day 1 | 100% of cascade runs |
+| **L1: Invariant Checks** | `invariants_ok` (I-2 ∧ I-7) in all builds; I-3, I-4 via `debug_assert!`; I-5, I-6 in tests ([ADR-016](../decisions/ADR-016.md)) | Day 1 | Per coverage matrix |
 | **L2: Paper Scenarios + Regressions** | Figure 4 + 5 known bug regressions | Week 1 | 10+ hardcoded test cases |
 | **L3: Property-Based Testing** | proptest random graph generation | Week 2 | 10,000+ random topologies |
 | **L4: Differential Testing** | Rust vs Python cascade oracle (`cascade_oracle.py`, ADR-007 pseudocode) | Week 2-3 | ≤1.0ms tolerance |
 | **L5: Mutation Testing** | cargo-mutants kill rate | Week 3 | ≥90% mutation detection |
 
-### 6.2 Weight Conservation + Invariants
+### 6.2 Production Sentinel + Invariants
 
-I-1 (per-entry-edge conservation) is the single strongest correctness check — it catches 4 of 5 known bugs discovered during pseudocode review. Implementation: ~20 lines in `assert_entry_edge_conserved()`. See [ADR-015](../decisions/ADR-015.md).
+The production sentinel `invariants_ok` (I-2 non-amplification ∧ I-7 locality) is a structural postcondition guard that runs in all builds. It catches 0/5 known bugs by construction (I-2 is unfalsifiable via `saturating_sub`; I-7 checks topology only). Known-bug detection relies on the full verification stack: regression tests, proptest, differential oracle, and mutation testing. See [ADR-016](../decisions/ADR-016.md).
 
-Invariant I-7 (locality) complements I-1 by catching path traversal errors where weight flows to non-adjacent nodes — a class of bug that I-1 alone cannot detect. It must be enforced alongside I-1 through I-7.
+I-7 (locality) catches path traversal errors where weight flows to non-adjacent nodes. I-3 and I-4 are enforced via `debug_assert!` in debug builds. I-5 (idempotency) and I-6 (depth monotonicity, simple chains only) are verified in tests.
 
 ### 6.3 Four Paper Scenarios
 
@@ -439,9 +439,9 @@ The Python cascade oracle (`cascade_oracle.py`, implementing the ADR-007 pseudoc
 
 **Common-mode failure risk:** Both implementations derive from the same ADR-007 pseudocode, so they could share the same conceptual error. Mitigation:
 - Cross-reference with the OSDI'18 paper's Figure 4 expected outputs (independent ground truth)
-- Per-entry-edge conservation (I-1) and other invariants provide independent structural verification
+- The 6 invariants (I-2 through I-7, see [ADR-016](../decisions/ADR-016.md)) provide independent structural verification
 - Test with adversarial inputs designed to expose specific algorithm edge cases
-- The Python oracle is restricted to non-overlapping graphs (no sweep-line partition); complex topologies rely on I-1/I-2 invariant assertions in the Rust implementation (see [cascade-understanding.md](../gate0/cascade-understanding.md) §6.3)
+- The Python oracle is restricted to non-overlapping graphs (no sweep-line partition); complex topologies rely on invariant assertions (I-2 through I-7) in the Rust implementation (see [cascade-understanding.md](../gate0/cascade-understanding.md) §6.3)
 
 ### 6.5 Mutation Testing
 
@@ -479,7 +479,7 @@ Three throwaway prototypes validate high-risk assumptions before any production 
 | Prototype | Validates | Pass Criteria | Failure Means |
 |-----------|----------|---------------|---------------|
 | **A: eBPF Minimal Collection** | sched_switch + sched_wakeup can capture matching event pairs on the host kernel | Event pairs match by TID for a 2-thread mutex workload | Toolchain or kernel issue — Phase 1 cannot start |
-| **B: Python Cascade** | Complete understanding of the paper's cascade redistribution algorithm | Figure 4 output matches paper exactly (Network=80ms, Parser=20ms, per-entry-edge conservation: 20+80=100ms, [ADR-015](../decisions/ADR-015.md)) | Cascade understanding is wrong — Rust implementation would diverge |
+| **B: Python Cascade** | Complete understanding of the paper's cascade redistribution algorithm | Figure 4 output matches paper exactly (Network=80ms, Parser=20ms, chain sum: 20+80=100ms) | Cascade understanding is wrong — Rust implementation would diverge |
 | **C: wPRF Roundtrip** | 64B header + TLV can serialize/deserialize/crash-recover | 10-event roundtrip + truncation recovery of first N events | Format spec has ambiguity — fix before coding |
 
 ### 7.2 Phase 0–3 Detailed Timeline
@@ -491,7 +491,7 @@ Gate 0 (Prototype Validation)                  Week 1
 └── C: .wperf roundtrip                        2 days
 
 Phase 0 (Cascade Correctness)                  Weeks 2–4
-├── W1: Core implementation + I-1~I-7 + Figure 4 tests
+├── W1: Core implementation + invariants (I-2~I-7, ADR-016) + Figure 4 tests
 ├── W2: proptest 10K graphs + 5 bug regressions + SCC/Condensation
 └── W3: Differential vs Python + mutation testing
 
@@ -636,7 +636,7 @@ The prior design spec claimed "zero P0/P1 residual items." This was a design com
 | Additional risks | 3 risks | **8 risks** | 5 omissions identified by pre-execution audit and cross-ADR review |
 | Decision rationale | Mixed into body | **Separate ADR files** | Clean separation of "what" from "why" |
 | "No false negatives" | Silently disappeared | **Explicit disposition** | Honest characterization of coverage guarantees |
-| I-7 invariant | Not present | **Adopted** | Catches path traversal errors (BUG-1 class) that I-1 alone misses |
+| I-7 invariant | Not present | **Adopted** | Catches path traversal errors (BUG-1 class); now part of `invariants_ok` production sentinel ([ADR-016](../decisions/ADR-016.md)) |
 
 ### C. Archived Project Failure Patterns
 
