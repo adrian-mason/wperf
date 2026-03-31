@@ -19,7 +19,7 @@ use crate::graph::types::*;
 use crate::graph::wfg::WaitForGraph;
 
 use super::invariants;
-pub use super::invariants::ConservationError;
+pub use super::invariants::InvariantError;
 
 const DEFAULT_MAX_DEPTH: u32 = 10;
 
@@ -28,12 +28,12 @@ const DEFAULT_MAX_DEPTH: u32 = 10;
 /// Each edge's `attributed_delay_ms` is set to `raw_wait - propagated`,
 /// where `propagated` is the weight explained by deeper nodes.
 ///
-/// Returns `Err(ConservationError)` if invariant checks fail.
+/// Returns `Err(InvariantError)` if invariant checks fail.
 /// Never panics — safe for release builds.
 pub fn cascade_engine(
     graph: &WaitForGraph,
     max_depth: Option<u32>,
-) -> Result<WaitForGraph, ConservationError> {
+) -> Result<WaitForGraph, InvariantError> {
     let max_depth = max_depth.unwrap_or(DEFAULT_MAX_DEPTH);
 
     let mut attribution: BTreeMap<EdgeIndex, u64> = BTreeMap::new();
@@ -57,8 +57,8 @@ pub fn cascade_engine(
         result.edge_weight_mut(*eidx).attributed_delay_ms = *attributed;
     }
 
-    // I-1: Production sentinel — verify conservation (never panics)
-    invariants::verify_conservation(graph, &result)?;
+    // Production sentinel — verify I-2 ∧ I-7 postconditions (never panics)
+    invariants::verify_engine_postconditions(graph, &result)?;
 
     // I-3: Non-negativity (trivially true for u64, documents intent)
     debug_assert!(
@@ -249,21 +249,21 @@ mod tests {
     }
 
     #[test]
-    fn cascade_no_amplification() {
+    fn cascade_invariants_ok() {
         let g = figure4_graph();
         let result = cascade_engine(&g, None).unwrap();
-        assert!(invariants::is_conserved(&result));
+        assert!(invariants::invariants_ok(&g, &result));
     }
 
     #[test]
-    fn is_conserved_false_on_bad_graph() {
+    fn invariants_ok_false_on_bad_graph() {
         let g = figure4_graph();
         let mut result = cascade_engine(&g, None).unwrap();
         // Corrupt: set attributed > raw on first edge
         let edges = result.all_edges();
         let eidx = edges[0].0;
         result.edge_weight_mut(eidx).attributed_delay_ms = 999;
-        assert!(!invariants::is_conserved(&result));
+        assert!(!invariants::invariants_ok(&g, &result));
     }
 
     #[test]
