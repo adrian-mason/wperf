@@ -1,7 +1,7 @@
 //! Cascade invariant checks (ADR-007, ADR-016).
 //!
-//! Production sentinel `invariants_ok` (I-2 ∧ I-7) runs in ALL builds
-//! via `verify_engine_postconditions`, which returns `Result`.
+//! The production sentinel check (I-2 ∧ I-7) runs in all builds. It is
+//! implemented by `verify_engine_postconditions` (returns `Result`) and `invariants_ok` (returns `bool`).
 //! I-3, I-4 are debug_assert only. I-5, I-6 are test-only.
 
 use std::fmt;
