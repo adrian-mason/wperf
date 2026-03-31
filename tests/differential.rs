@@ -148,7 +148,7 @@ fn compare_results(rust_graph: &WaitForGraph, python: &OracleOutput, test_name: 
 }
 
 fn run_differential(g: &WaitForGraph, test_name: &str) {
-    let rust_result = cascade_engine(g, None);
+    let rust_result = cascade_engine(g, None).unwrap();
     let input = graph_to_oracle_input(g);
     let python_result = run_python_oracle(&input);
     compare_results(&rust_result, &python_result, test_name);

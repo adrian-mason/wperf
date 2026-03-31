@@ -3,7 +3,8 @@
 //! Each test constructs the minimal graph triggering the specific bug
 //! and verifies the fix produces correct output.
 
-use wperf::cascade::engine::{cascade_engine, is_conserved};
+use wperf::cascade::engine::cascade_engine;
+use wperf::cascade::invariants::is_conserved;
 use wperf::graph::types::*;
 use wperf::graph::wfg::WaitForGraph;
 
@@ -31,7 +32,7 @@ fn bug1_visited_path_scope() {
     g.add_edge(ThreadId(3), ThreadId(5), TimeWindow::new(0, 50)); // C→E
     g.add_edge(ThreadId(4), ThreadId(5), TimeWindow::new(50, 100)); // D→E
 
-    let result = cascade_engine(&g, None);
+    let result = cascade_engine(&g, None).unwrap();
 
     // A→B: B is busy for the full 100ms (with C then D) → attributed=0
     let edges = result.all_edges();
@@ -62,7 +63,7 @@ fn bug1_visited_path_scope() {
         "D→E must not be zero (BUG-1: E was skipped via D path)"
     );
 
-    assert!(is_conserved(&g, &result));
+    assert!(is_conserved(&result));
 }
 
 /// BUG-2: propagated_down return value ignored.
@@ -84,7 +85,7 @@ fn bug2_propagated_down_ignored() {
     g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 100));
     g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(20, 100));
 
-    let result = cascade_engine(&g, None);
+    let result = cascade_engine(&g, None).unwrap();
     let edges = result.all_edges();
 
     let ab = edges
@@ -99,7 +100,7 @@ fn bug2_propagated_down_ignored() {
     );
     assert_eq!(ab.3.attributed_delay_ms, 20);
 
-    assert!(is_conserved(&g, &result));
+    assert!(is_conserved(&result));
 }
 
 /// BUG-3: multi-edge overlap double-counting.
@@ -124,7 +125,7 @@ fn bug3_multi_edge_overlap() {
     g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(0, 60)); // B→C
     g.add_edge(ThreadId(2), ThreadId(4), TimeWindow::new(20, 80)); // B→D
 
-    let result = cascade_engine(&g, None);
+    let result = cascade_engine(&g, None).unwrap();
     let edges = result.all_edges();
 
     let ab = edges
@@ -142,7 +143,7 @@ fn bug3_multi_edge_overlap() {
     // B is idle during [80,100) → 20ms is B's direct fault
     assert_eq!(ab.3.attributed_delay_ms, 20);
 
-    assert!(is_conserved(&g, &result));
+    assert!(is_conserved(&result));
 }
 
 /// BUG-4: BUG-2 + BUG-3 combined.
@@ -166,7 +167,7 @@ fn bug4_combined_bug2_bug3() {
     g.add_edge(ThreadId(2), ThreadId(4), TimeWindow::new(20, 80)); // B→D
     g.add_edge(ThreadId(3), ThreadId(5), TimeWindow::new(0, 60)); // C→E
 
-    let result = cascade_engine(&g, None);
+    let result = cascade_engine(&g, None).unwrap();
     let edges = result.all_edges();
 
     let ab = edges
@@ -189,7 +190,7 @@ fn bug4_combined_bug2_bug3() {
         "B→C must propagate weight to E"
     );
 
-    assert!(is_conserved(&g, &result));
+    assert!(is_conserved(&result));
 }
 
 /// NEW-BUG-1: leaf node zero blame.
@@ -209,7 +210,7 @@ fn new_bug1_leaf_node_zero_blame() {
     g.add_node(ThreadId(2), NodeKind::UserThread);
     g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
 
-    let result = cascade_engine(&g, None);
+    let result = cascade_engine(&g, None).unwrap();
     let edges = result.all_edges();
 
     // B is a leaf — full attribution belongs to B
@@ -218,5 +219,5 @@ fn new_bug1_leaf_node_zero_blame() {
         "NEW-BUG-1: leaf node must get full attribution"
     );
 
-    assert!(is_conserved(&g, &result));
+    assert!(is_conserved(&result));
 }
