@@ -43,7 +43,8 @@ pub fn cascade_engine(graph: &WaitForGraph, max_depth: Option<u32>) -> WaitForGr
         let mut path = BTreeSet::new();
         path.insert(src_tid);
 
-        let propagated = compute_cascade(graph, dst_tid, &window, 1, max_depth, &mut path);
+        let (propagated, _self_blame) =
+            compute_cascade(graph, dst_tid, &window, 1, max_depth, &mut path);
 
         let attributed = raw_wait.saturating_sub(propagated);
         attribution.insert(eidx, attributed);
@@ -79,7 +80,15 @@ pub fn is_conserved(original: &WaitForGraph, result: &WaitForGraph) -> bool {
 }
 
 /// Recursive cascade computation (ADR-007 pseudocode).
-/// Returns total weight propagated to deeper nodes.
+///
+/// Returns `(total_propagated, self_blame)`:
+/// - `total_propagated`: weight pushed to deeper nodes via outgoing edges
+/// - `self_blame`: time in `window` not covered by any outgoing edge
+///
+/// Per-entry-edge conservation (I-1, ADR-015): for each entry edge,
+/// `propagated + self_blame <= window.duration()`. Equality holds when
+/// no fan-out or concurrent-waiter scaling is applied; integer division
+/// truncation may cause the sum to be strictly less.
 fn compute_cascade(
     graph: &WaitForGraph,
     current: ThreadId,
@@ -87,24 +96,26 @@ fn compute_cascade(
     depth: u32,
     max_depth: u32,
     path: &mut BTreeSet<ThreadId>,
-) -> u64 {
+) -> (u64, u64) {
     if depth >= max_depth || path.contains(&current) {
-        return 0;
+        return (0, window.duration());
     }
 
     let intervals = sweep_line_partition(graph, current, window);
     if intervals.is_empty() {
-        return 0;
+        return (0, window.duration());
     }
 
     path.insert(current);
     let mut total_propagated: u64 = 0;
+    let mut coverage: u64 = 0;
 
     for interval in &intervals {
         let target_count = interval.targets.len() as u64;
+        coverage += interval.window.duration();
 
         for &next_node in &interval.targets {
-            let _ = compute_cascade(
+            let (prop_down, child_blame) = compute_cascade(
                 graph,
                 next_node,
                 &interval.window,
@@ -113,21 +124,20 @@ fn compute_cascade(
                 path,
             );
 
-            // NEW-BUG-1 FIX: The child's subtree absorbs the entire interval duration.
-            // This correctly attributes blame to leaf nodes, which would otherwise be zero.
-            let child_subtree_absorbed = interval.window.duration();
+            let child_absorbed = prop_down + child_blame;
 
             let external_waiters = count_concurrent_waiters(graph, next_node, &interval.window);
             let scale_target = target_count.max(1);
             let scale_external = external_waiters.max(1);
 
-            let transfer = child_subtree_absorbed / scale_target / scale_external;
+            let transfer = child_absorbed / scale_target / scale_external;
             total_propagated += transfer;
         }
     }
 
     path.remove(&current);
-    total_propagated
+    let self_blame = window.duration().saturating_sub(coverage);
+    (total_propagated, self_blame)
 }
 
 fn count_concurrent_waiters(graph: &WaitForGraph, target: ThreadId, window: &TimeWindow) -> u64 {
