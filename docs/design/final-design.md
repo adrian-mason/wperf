@@ -237,7 +237,7 @@ The cascade algorithm redistributes wait time from direct waiters to root-cause 
 - Maximum recursion depth of 10 (practical limit for real workloads); if exceeded, the branch is truncated and `cascade_depth_truncation_count` is incremented
 - Complexity: O(E × D × log K) where D=recursion depth ≤10, K=concurrent holders typically <5, effectively near-linear
 
-**Six invariants** enforced after every cascade run (see [ADR-016](../decisions/ADR-016.md) for I-1 retirement and I-6 narrowing):
+**Six invariants** verified across multiple layers (see [ADR-016](../decisions/ADR-016.md) for I-1 retirement, I-6 narrowing, and the verification coverage matrix):
 
 | ID | Invariant | What It Catches | Scope |
 |----|-----------|----------------|-------|
