@@ -81,10 +81,11 @@ pub fn cascade_engine(
 /// - `total_propagated`: weight pushed to deeper nodes via outgoing edges
 /// - `self_blame`: time in `window` not covered by any outgoing edge
 ///
-/// Per-entry-edge conservation (I-1, ADR-015): for each entry edge,
-/// `propagated + self_blame <= window.duration()`. Equality holds when
-/// no fan-out or concurrent-waiter scaling is applied; integer division
-/// truncation may cause the sum to be strictly less.
+/// Internal tuple accounting: `propagated + self_blame <= window.duration()`.
+/// Equality holds when no fan-out or concurrent-waiter scaling is applied;
+/// integer division truncation may cause the sum to be strictly less.
+/// Note: I-1 (conservation) was retired by ADR-016. This property is
+/// by-construction (attributed = raw - propagated), not an external invariant.
 fn compute_cascade(
     graph: &WaitForGraph,
     current: ThreadId,

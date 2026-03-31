@@ -1,4 +1,4 @@
-//! Property-based tests: 10K random graphs, all 7 invariants.
+//! Property-based tests: 10K random graphs, invariants I-2 through I-5, I-7 (ADR-016).
 //!
 //! Uses proptest to generate random WFGs biased toward realistic
 //! characteristics: sparse, mostly acyclic, depth 3-8.
