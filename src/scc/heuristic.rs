@@ -73,7 +73,7 @@ mod tests {
         g.add_node(ThreadId(2), NodeKind::UserThread);
         g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
 
-        let result = cascade_engine(&g, None);
+        let result = cascade_engine(&g, None).unwrap();
         let scc = Scc {
             members: vec![ThreadId(2)],
         };
@@ -107,7 +107,7 @@ mod tests {
         g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 100));
         g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(20, 100));
 
-        let result = cascade_engine(&g, None);
+        let result = cascade_engine(&g, None).unwrap();
         let mut cdag = build_condensation(&result);
         apply_max_heuristic(&mut cdag, &result);
 
@@ -126,7 +126,7 @@ mod tests {
         g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 100));
         g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(20, 100));
 
-        let result = cascade_engine(&g, None);
+        let result = cascade_engine(&g, None).unwrap();
         let mut cdag = build_condensation(&result);
         apply_max_heuristic(&mut cdag, &result);
 

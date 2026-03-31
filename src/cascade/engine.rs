@@ -19,6 +19,7 @@ use crate::graph::types::*;
 use crate::graph::wfg::WaitForGraph;
 
 use super::invariants;
+pub use super::invariants::ConservationError;
 
 const DEFAULT_MAX_DEPTH: u32 = 10;
 
@@ -27,11 +28,12 @@ const DEFAULT_MAX_DEPTH: u32 = 10;
 /// Each edge's `attributed_delay_ms` is set to `raw_wait - propagated`,
 /// where `propagated` is the weight explained by deeper nodes.
 ///
-/// Invariant checks:
-/// - I-2 (non-amplification): attributed ≤ raw per edge — always checked
-/// - I-3 (non-negativity): attributed ≥ 0 — trivially true for u64
-/// - I-7 (locality): checked in debug builds
-pub fn cascade_engine(graph: &WaitForGraph, max_depth: Option<u32>) -> WaitForGraph {
+/// Returns `Err(ConservationError)` if invariant checks fail.
+/// Never panics — safe for release builds.
+pub fn cascade_engine(
+    graph: &WaitForGraph,
+    max_depth: Option<u32>,
+) -> Result<WaitForGraph, ConservationError> {
     let max_depth = max_depth.unwrap_or(DEFAULT_MAX_DEPTH);
 
     let mut attribution: BTreeMap<EdgeIndex, u64> = BTreeMap::new();
@@ -55,8 +57,8 @@ pub fn cascade_engine(graph: &WaitForGraph, max_depth: Option<u32>) -> WaitForGr
         result.edge_weight_mut(*eidx).attributed_delay_ms = *attributed;
     }
 
-    // I-1: Weight Conservation — production sentinel (always runs)
-    invariants::assert_weight_conserved(graph, &result);
+    // I-1: Production sentinel — verify conservation (never panics)
+    invariants::verify_conservation(graph, &result)?;
 
     // I-3: Non-negativity (trivially true for u64, documents intent)
     debug_assert!(
@@ -70,13 +72,7 @@ pub fn cascade_engine(graph: &WaitForGraph, max_depth: Option<u32>) -> WaitForGr
         "I-4 VIOLATION: cascade changed graph topology"
     );
 
-    result
-}
-
-/// Check if the cascade result is conserved (non-panicking).
-/// Delegates to invariants::is_conserved (I-2 + I-7).
-pub fn is_conserved(original: &WaitForGraph, result: &WaitForGraph) -> bool {
-    invariants::is_conserved(original, result)
+    Ok(result)
 }
 
 /// Recursive cascade computation (ADR-007 pseudocode).
@@ -179,7 +175,7 @@ mod tests {
         g.add_node(ThreadId(2), NodeKind::UserThread);
         g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
 
-        let result = cascade_engine(&g, None);
+        let result = cascade_engine(&g, None).unwrap();
         let edges = result.all_edges();
         assert_eq!(edges[0].3.attributed_delay_ms, 50);
     }
@@ -187,7 +183,7 @@ mod tests {
     #[test]
     fn cascade_figure4() {
         let g = figure4_graph();
-        let result = cascade_engine(&g, None);
+        let result = cascade_engine(&g, None).unwrap();
 
         let edges = result.all_edges();
         let user_parser = edges
@@ -216,7 +212,7 @@ mod tests {
         g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(20, 100)); // Parser→Network
         g.add_edge(ThreadId(3), ThreadId(4), TimeWindow::new(50, 100)); // Network→Disk
 
-        let result = cascade_engine(&g, None);
+        let result = cascade_engine(&g, None).unwrap();
         let edges = result.all_edges();
 
         let up = edges
@@ -243,7 +239,7 @@ mod tests {
     #[test]
     fn cascade_leaf_nonzero() {
         let g = figure4_graph();
-        let result = cascade_engine(&g, None);
+        let result = cascade_engine(&g, None).unwrap();
         let edges = result.all_edges();
         let parser_network = edges
             .iter()
@@ -255,19 +251,19 @@ mod tests {
     #[test]
     fn cascade_no_amplification() {
         let g = figure4_graph();
-        let result = cascade_engine(&g, None);
-        assert!(is_conserved(&g, &result));
+        let result = cascade_engine(&g, None).unwrap();
+        assert!(invariants::is_conserved(&result));
     }
 
     #[test]
     fn is_conserved_false_on_bad_graph() {
         let g = figure4_graph();
-        let mut result = cascade_engine(&g, None);
+        let mut result = cascade_engine(&g, None).unwrap();
         // Corrupt: set attributed > raw on first edge
         let edges = result.all_edges();
         let eidx = edges[0].0;
         result.edge_weight_mut(eidx).attributed_delay_ms = 999;
-        assert!(!is_conserved(&g, &result));
+        assert!(!invariants::is_conserved(&result));
     }
 
     #[test]
@@ -285,7 +281,7 @@ mod tests {
         g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(0, 100));
         g.add_edge(ThreadId(4), ThreadId(3), TimeWindow::new(0, 100));
 
-        let result = cascade_engine(&g, None);
+        let result = cascade_engine(&g, None).unwrap();
         let edges = result.all_edges();
 
         let e12 = edges
@@ -310,8 +306,8 @@ mod tests {
         g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 100));
         g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(0, 100));
 
-        let shallow = cascade_engine(&g, Some(1));
-        let deep = cascade_engine(&g, Some(10));
+        let shallow = cascade_engine(&g, Some(1)).unwrap();
+        let deep = cascade_engine(&g, Some(10)).unwrap();
 
         let s_edges = shallow.all_edges();
         let d_edges = deep.all_edges();
@@ -337,7 +333,7 @@ mod tests {
     #[test]
     fn total_attributed_less_than_raw() {
         let g = figure4_graph();
-        let result = cascade_engine(&g, None);
+        let result = cascade_engine(&g, None).unwrap();
         // Total attributed should be less than total raw (weight absorbed by cascade)
         assert!(result.total_attributed() < g.total_raw_wait());
         assert!(result.total_attributed() > 0);

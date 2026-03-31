@@ -113,7 +113,7 @@ mod tests {
     use crate::scc::tarjan::build_condensation;
 
     fn run_pipeline(g: &WaitForGraph) -> CriticalPath {
-        let result = cascade_engine(g, None);
+        let result = cascade_engine(g, None).unwrap();
         let mut cdag = build_condensation(&result);
         apply_max_heuristic(&mut cdag, &result);
         critical_path_dp(&cdag).unwrap()

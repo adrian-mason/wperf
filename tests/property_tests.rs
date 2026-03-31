@@ -5,10 +5,10 @@
 
 use proptest::prelude::*;
 
-use wperf::cascade::engine::{cascade_engine, is_conserved};
+use wperf::cascade::engine::cascade_engine;
 use wperf::cascade::invariants::{
     check_idempotency, check_locality, check_non_amplification, check_non_negativity,
-    check_termination,
+    check_termination, is_conserved,
 };
 use wperf::graph::types::*;
 use wperf::graph::wfg::WaitForGraph;
@@ -67,10 +67,10 @@ proptest! {
 
     #[test]
     fn all_invariants_hold(g in arb_wfg()) {
-        let result = cascade_engine(&g, None);
+        let result = cascade_engine(&g, None).unwrap();
 
-        // I-1: Production sentinel (I-2 + I-7)
-        prop_assert!(is_conserved(&g, &result), "I-1 (conservation) failed");
+        // I-1: Per-entry-edge conservation (non-amplification)
+        prop_assert!(is_conserved(&result), "I-1 (conservation) failed");
 
         // I-2: Non-amplification
         prop_assert!(check_non_amplification(&result), "I-2 (non-amplification) failed");
@@ -98,7 +98,7 @@ proptest! {
 
     #[test]
     fn condensation_is_acyclic(g in arb_wfg()) {
-        let result = cascade_engine(&g, None);
+        let result = cascade_engine(&g, None).unwrap();
         let cdag = build_condensation(&result);
         // Condensation must be a DAG — toposort should succeed
         prop_assert!(

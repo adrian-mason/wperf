@@ -1,43 +1,58 @@
 //! Cascade invariant checks (ADR-007).
 //!
-//! I-1 runs in ALL builds (production sentinel).
+//! I-1 (per-entry-edge conservation) runs in ALL builds via
+//! `verify_conservation`, which returns `Result`.
 //! I-2..I-7 are debug_assert only.
+
+use std::fmt;
 
 use crate::graph::wfg::WaitForGraph;
 
-/// I-1: Weight Conservation (production sentinel).
-///
-/// Checks I-2 (non-amplification) + I-7 (locality). This runs in ALL
-/// builds — it is the first line of defense against algorithm bugs.
-///
-/// Note: global sum equality (`Σ attributed == Σ raw`) does NOT hold
-/// after cascade redistribution. The cascade absorbs weight at
-/// intermediate nodes, so `total_attributed ≤ total_raw`. Per-edge
-/// non-amplification (I-2) is the correct conservation check.
-pub fn is_conserved(original: &WaitForGraph, result: &WaitForGraph) -> bool {
-    check_non_amplification(result) && check_locality(original, result)
+/// Error returned when cascade invariant checks fail.
+#[derive(Debug)]
+pub struct ConservationError {
+    pub i2_ok: bool,
+    pub i7_ok: bool,
 }
 
-/// I-1 enforcement: call after every cascade run.
-/// Panics in debug builds, logs warning in release builds.
-/// Returns the conservation status.
-pub fn assert_weight_conserved(original: &WaitForGraph, result: &WaitForGraph) -> bool {
-    let i2 = check_non_amplification(result);
-    let i7 = check_locality(original, result);
-    let conserved = i2 && i7;
-
-    if !conserved {
-        if cfg!(debug_assertions) {
-            panic!(
-                "I-1 VIOLATION: conservation check failed (I-2={}, I-7={})",
-                i2, i7
-            );
-        } else {
-            eprintln!("[wperf] WARNING: I-1 violation (I-2={}, I-7={})", i2, i7);
-        }
+impl fmt::Display for ConservationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "I-1 VIOLATION: conservation check failed (I-2={}, I-7={})",
+            self.i2_ok, self.i7_ok
+        )
     }
+}
 
-    conserved
+impl std::error::Error for ConservationError {}
+
+/// I-1: Per-entry-edge conservation (production sentinel).
+///
+/// Checks non-amplification only: no edge's attributed_delay_ms
+/// exceeds its raw_wait_ms. This is the per-entry-edge invariant
+/// defined in ADR-015.
+pub fn is_conserved(result: &WaitForGraph) -> bool {
+    check_non_amplification(result)
+}
+
+/// Internal engine sentinel: verify I-2 + I-7 after cascade.
+///
+/// Stricter than `is_conserved` (which only checks I-1/I-2). This also
+/// verifies I-7 (locality) to catch algorithm bugs that alter topology.
+/// Returns `Err(ConservationError)` on violation — never panics.
+pub fn verify_conservation(
+    original: &WaitForGraph,
+    result: &WaitForGraph,
+) -> Result<(), ConservationError> {
+    let i2_ok = check_non_amplification(result);
+    let i7_ok = check_locality(original, result);
+
+    if i2_ok && i7_ok {
+        Ok(())
+    } else {
+        Err(ConservationError { i2_ok, i7_ok })
+    }
 }
 
 /// I-2: Non-amplification.
@@ -97,8 +112,8 @@ pub fn check_locality(original: &WaitForGraph, result: &WaitForGraph) -> bool {
 pub fn check_idempotency(graph: &WaitForGraph, max_depth: u32) -> bool {
     use super::engine::cascade_engine;
 
-    let first = cascade_engine(graph, Some(max_depth));
-    let second = cascade_engine(&first, Some(max_depth));
+    let first = cascade_engine(graph, Some(max_depth)).expect("I-5: first cascade failed");
+    let second = cascade_engine(&first, Some(max_depth)).expect("I-5: second cascade failed");
 
     // Compare all attributed_delay_ms values
     let e1 = first.all_edges();
@@ -130,8 +145,8 @@ pub fn check_idempotency(graph: &WaitForGraph, max_depth: u32) -> bool {
 pub fn check_depth_monotonicity(graph: &WaitForGraph) -> bool {
     use super::engine::cascade_engine;
 
-    let shallow = cascade_engine(graph, Some(2));
-    let deep = cascade_engine(graph, Some(10));
+    let shallow = cascade_engine(graph, Some(2)).expect("I-6: shallow cascade failed");
+    let deep = cascade_engine(graph, Some(10)).expect("I-6: deep cascade failed");
 
     deep.total_attributed() <= shallow.total_attributed()
 }
@@ -149,7 +164,7 @@ mod tests {
         g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
 
         let result = g.clone_with_reset_attribution();
-        assert!(is_conserved(&g, &result));
+        assert!(is_conserved(&result));
     }
 
     #[test]
@@ -162,8 +177,8 @@ mod tests {
         g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 100));
         g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(20, 100));
 
-        let result = cascade_engine(&g, None);
-        assert!(is_conserved(&g, &result));
+        let result = cascade_engine(&g, None).unwrap();
+        assert!(is_conserved(&result));
     }
 
     #[test]
@@ -178,11 +193,11 @@ mod tests {
         let edges = bad.all_edges();
         let eidx = edges[0].0;
         bad.edge_weight_mut(eidx).attributed_delay_ms = 999;
-        assert!(!is_conserved(&g, &bad));
+        assert!(!is_conserved(&bad));
     }
 
     #[test]
-    fn conservation_detects_locality_violation() {
+    fn verify_conservation_detects_locality_violation() {
         let mut g = WaitForGraph::new();
         g.add_node(ThreadId(1), NodeKind::UserThread);
         g.add_node(ThreadId(2), NodeKind::UserThread);
@@ -192,7 +207,7 @@ mod tests {
         let mut bad = g.clone_with_reset_attribution();
         bad.add_node(ThreadId(3), NodeKind::UserThread);
         bad.add_edge(ThreadId(1), ThreadId(3), TimeWindow::new(0, 30));
-        assert!(!is_conserved(&g, &bad));
+        assert!(verify_conservation(&g, &bad).is_err());
     }
 
     #[test]
@@ -302,15 +317,15 @@ mod tests {
     }
 
     #[test]
-    fn assert_weight_conserved_returns_true_on_valid() {
+    fn verify_conservation_returns_ok_on_valid() {
         use crate::cascade::engine::cascade_engine;
         let mut g = WaitForGraph::new();
         g.add_node(ThreadId(1), NodeKind::UserThread);
         g.add_node(ThreadId(2), NodeKind::UserThread);
         g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
 
-        let result = cascade_engine(&g, None);
-        assert!(assert_weight_conserved(&g, &result));
+        let result = cascade_engine(&g, None).unwrap();
+        assert!(verify_conservation(&g, &result).is_ok());
     }
 
     #[test]
@@ -353,7 +368,7 @@ mod tests {
         g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(20, 100));
 
         // Verify cascade actually changes attributed values
-        let result = cascade_engine(&g, Some(10));
+        let result = cascade_engine(&g, Some(10)).unwrap();
         let edges = result.all_edges();
         let e12 = edges
             .iter()
@@ -378,8 +393,8 @@ mod tests {
         g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 100));
         g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(0, 100));
 
-        let shallow = cascade_engine(&g, Some(2));
-        let deep = cascade_engine(&g, Some(10));
+        let shallow = cascade_engine(&g, Some(2)).unwrap();
+        let deep = cascade_engine(&g, Some(10)).unwrap();
         // Deep cascade propagates more → less total attributed
         assert!(deep.total_attributed() <= shallow.total_attributed());
         assert!(check_depth_monotonicity(&g));
