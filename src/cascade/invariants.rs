@@ -113,10 +113,20 @@ pub fn check_idempotency(graph: &WaitForGraph, max_depth: u32) -> bool {
         .all(|(a, b)| a.3.attributed_delay_ms == b.3.attributed_delay_ms)
 }
 
-/// I-6: Depth monotonicity.
-/// Increasing max_depth propagates more weight downstream, so
-/// total_attributed(deep) ≤ total_attributed(shallow).
-/// Test-only — runs cascade at two depths.
+/// I-6: Depth monotonicity (simple chains only).
+///
+/// For simple chains (no fan-out, no concurrent waiters): increasing
+/// max_depth propagates more weight downstream, so
+/// `total_attributed(deep) ≤ total_attributed(shallow)`.
+///
+/// Does NOT hold in general because the corrected child_absorbed
+/// computation (`prop_down + child_blame`) can be less than
+/// `window.duration()` when fan-out (target_count > 1) or concurrent
+/// waiters divide the transfer amount. This means deeper recursion
+/// may propagate less weight downstream than the depth-truncation
+/// base case, which returns full `(0, window.duration())`.
+///
+/// Test-only — runs cascade at two depths. Only valid on simple chains.
 pub fn check_depth_monotonicity(graph: &WaitForGraph) -> bool {
     use super::engine::cascade_engine;
 

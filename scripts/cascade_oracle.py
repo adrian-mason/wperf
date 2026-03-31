@@ -83,28 +83,31 @@ def count_concurrent_waiters(graph, target, w_start, w_end):
 
 
 def compute_cascade(graph, current, w_start, w_end, depth, path):
-    """Recursive cascade computation. Returns total propagated weight."""
+    """Recursive cascade computation. Returns (total_propagated, self_blame)."""
+    duration = w_end - w_start
     if depth >= MAX_DEPTH or current in path:
-        return 0
+        return (0, duration)
 
     outgoing = graph["outgoing"].get(current, [])
 
     intervals = sweep_line_partition(outgoing, w_start, w_end)
     if not intervals:
-        return 0
+        return (0, duration)
 
     path.add(current)
     total_propagated = 0
+    coverage = 0
 
     for i_start, i_end, targets in intervals:
         target_count = max(len(targets), 1)
-        duration = i_end - i_start
+        interval_duration = i_end - i_start
+        coverage += interval_duration
 
         for next_node in targets:
-            compute_cascade(
+            prop_down, child_blame = compute_cascade(
                 graph, next_node, i_start, i_end, depth + 1, path
             )
-            child_absorbed = duration
+            child_absorbed = prop_down + child_blame
             external = count_concurrent_waiters(
                 graph, next_node, i_start, i_end
             )
@@ -112,7 +115,8 @@ def compute_cascade(graph, current, w_start, w_end, depth, path):
             total_propagated += transfer
 
     path.remove(current)
-    return total_propagated
+    self_blame = max(0, duration - coverage)
+    return (total_propagated, self_blame)
 
 
 def cascade_engine(graph):
@@ -122,7 +126,7 @@ def cascade_engine(graph):
     for src, dst, e_start, e_end in graph["edge_list"]:
         raw_wait = e_end - e_start
         path = {src}
-        propagated = compute_cascade(
+        propagated, _self_blame = compute_cascade(
             graph, dst, e_start, e_end, 1, path
         )
         attributed = max(0, raw_wait - propagated)

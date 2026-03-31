@@ -150,6 +150,11 @@ impl WaitForGraph {
             .sum()
     }
 
+    /// Returns true if the graph has no directed cycles.
+    pub fn is_acyclic(&self) -> bool {
+        petgraph::algo::toposort(&self.graph, None).is_ok()
+    }
+
     /// Sum of all attributed_delay_ms across all edges.
     pub fn total_attributed(&self) -> u64 {
         self.graph

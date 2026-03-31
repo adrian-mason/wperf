@@ -7,8 +7,8 @@ use proptest::prelude::*;
 
 use wperf::cascade::engine::{cascade_engine, is_conserved};
 use wperf::cascade::invariants::{
-    check_depth_monotonicity, check_idempotency, check_locality, check_non_amplification,
-    check_non_negativity, check_termination,
+    check_idempotency, check_locality, check_non_amplification, check_non_negativity,
+    check_termination,
 };
 use wperf::graph::types::*;
 use wperf::graph::wfg::WaitForGraph;
@@ -91,11 +91,10 @@ proptest! {
         prop_assert!(check_idempotency(&g, 10), "I-5 (idempotency) failed");
     }
 
-    #[test]
-    fn depth_monotonicity_holds(g in arb_wfg()) {
-        // I-6: Separate test — runs cascade at two depths
-        prop_assert!(check_depth_monotonicity(&g), "I-6 (depth monotonicity) failed");
-    }
+    // I-6 (depth monotonicity) removed from property testing.
+    // It only holds for simple chains — fan-out and concurrent waiters
+    // cause child_absorbed < window.duration(), breaking monotonicity.
+    // See invariants.rs I-6 doc. Unit tests cover the chain case.
 
     #[test]
     fn condensation_is_acyclic(g in arb_wfg()) {
