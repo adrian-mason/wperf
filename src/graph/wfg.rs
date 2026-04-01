@@ -234,6 +234,7 @@ mod tests {
     fn total_attributed_matches_raw_before_cascade() {
         let g = simple_graph();
         // Before cascade, attributed == raw
+        assert_eq!(g.total_attributed(), g.total_raw_wait());
         assert_eq!(g.total_attributed(), 100);
     }
 }
