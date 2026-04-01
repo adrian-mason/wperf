@@ -213,4 +213,28 @@ mod tests {
         assert_eq!(a, b);
         assert_eq!(g.node_count(), 1);
     }
+
+    #[test]
+    fn is_acyclic_linear() {
+        let g = simple_graph();
+        assert!(g.is_acyclic());
+    }
+
+    #[test]
+    fn is_acyclic_cycle() {
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
+        g.add_edge(ThreadId(2), ThreadId(1), TimeWindow::new(0, 50));
+        assert!(!g.is_acyclic());
+    }
+
+    #[test]
+    fn total_attributed_matches_raw_before_cascade() {
+        let g = simple_graph();
+        // Before cascade, attributed == raw
+        assert_eq!(g.total_attributed(), g.total_raw_wait());
+        assert_eq!(g.total_attributed(), 100);
+    }
 }

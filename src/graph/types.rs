@@ -147,6 +147,8 @@ mod tests {
     fn thread_id_display() {
         assert_eq!(format!("{}", ThreadId(-4)), "NIC");
         assert_eq!(format!("{}", ThreadId(-5)), "Disk");
+        assert_eq!(format!("{}", ThreadId(-15)), "HardIRQ");
+        assert_eq!(format!("{}", ThreadId(-16)), "SoftIRQ");
         assert_eq!(format!("{}", ThreadId(1234)), "T1234");
     }
 }
