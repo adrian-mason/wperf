@@ -1,8 +1,8 @@
-//! Cascade invariant checks (ADR-007).
+//! Cascade invariant checks (ADR-007, ADR-016).
 //!
-//! I-1 (per-entry-edge conservation) runs in ALL builds via
-//! `verify_conservation`, which returns `Result`.
-//! I-2..I-7 are debug_assert only.
+//! The production sentinel check (I-2 ∧ I-7) runs in all builds. It is
+//! implemented by `verify_engine_postconditions` (returns `Result`) and `invariants_ok` (returns `bool`).
+//! I-3, I-4 are debug_assert only. I-5, I-6 are test-only.
 
 use std::fmt;
 
@@ -10,48 +10,48 @@ use crate::graph::wfg::WaitForGraph;
 
 /// Error returned when cascade invariant checks fail.
 #[derive(Debug)]
-pub struct ConservationError {
+pub struct InvariantError {
     pub i2_ok: bool,
     pub i7_ok: bool,
 }
 
-impl fmt::Display for ConservationError {
+impl fmt::Display for InvariantError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "I-1 VIOLATION: conservation check failed (I-2={}, I-7={})",
+            "INVARIANT VIOLATION: postcondition check failed (I-2={}, I-7={})",
             self.i2_ok, self.i7_ok
         )
     }
 }
 
-impl std::error::Error for ConservationError {}
+impl std::error::Error for InvariantError {}
 
-/// I-1: Per-entry-edge conservation (production sentinel).
+/// Production sentinel: I-2 (non-amplification) ∧ I-7 (locality).
 ///
-/// Checks non-amplification only: no edge's attributed_delay_ms
-/// exceeds its raw_wait_ms. This is the per-entry-edge invariant
-/// defined in ADR-015.
-pub fn is_conserved(result: &WaitForGraph) -> bool {
-    check_non_amplification(result)
+/// Structural postcondition guard per ADR-016. Checks that no edge's
+/// attributed_delay_ms exceeds its raw_wait_ms (I-2) and that graph
+/// topology is preserved (I-7). Catches 0/5 known bugs by construction;
+/// its value is defense-in-depth against future regressions.
+pub fn invariants_ok(original: &WaitForGraph, result: &WaitForGraph) -> bool {
+    check_non_amplification(result) && check_locality(original, result)
 }
 
-/// Internal engine sentinel: verify I-2 + I-7 after cascade.
+/// Engine postcondition check: verify I-2 + I-7 after cascade.
 ///
-/// Stricter than `is_conserved` (which only checks I-1/I-2). This also
-/// verifies I-7 (locality) to catch algorithm bugs that alter topology.
-/// Returns `Err(ConservationError)` on violation — never panics.
-pub fn verify_conservation(
+/// Returns `Err(InvariantError)` on violation — never panics.
+/// Called inside `cascade_engine` before returning.
+pub fn verify_engine_postconditions(
     original: &WaitForGraph,
     result: &WaitForGraph,
-) -> Result<(), ConservationError> {
+) -> Result<(), InvariantError> {
     let i2_ok = check_non_amplification(result);
     let i7_ok = check_locality(original, result);
 
     if i2_ok && i7_ok {
         Ok(())
     } else {
-        Err(ConservationError { i2_ok, i7_ok })
+        Err(InvariantError { i2_ok, i7_ok })
     }
 }
 
@@ -157,18 +157,18 @@ mod tests {
     use crate::graph::types::*;
 
     #[test]
-    fn conservation_passes_on_identity() {
+    fn invariants_ok_passes_on_identity() {
         let mut g = WaitForGraph::new();
         g.add_node(ThreadId(1), NodeKind::UserThread);
         g.add_node(ThreadId(2), NodeKind::UserThread);
         g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
 
         let result = g.clone_with_reset_attribution();
-        assert!(is_conserved(&result));
+        assert!(invariants_ok(&g, &result));
     }
 
     #[test]
-    fn conservation_passes_on_cascade_result() {
+    fn invariants_ok_passes_on_cascade_result() {
         use crate::cascade::engine::cascade_engine;
         let mut g = WaitForGraph::new();
         g.add_node(ThreadId(1), NodeKind::UserThread);
@@ -178,11 +178,11 @@ mod tests {
         g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(20, 100));
 
         let result = cascade_engine(&g, None).unwrap();
-        assert!(is_conserved(&result));
+        assert!(invariants_ok(&g, &result));
     }
 
     #[test]
-    fn conservation_detects_amplification() {
+    fn invariants_ok_detects_amplification() {
         let mut g = WaitForGraph::new();
         g.add_node(ThreadId(1), NodeKind::UserThread);
         g.add_node(ThreadId(2), NodeKind::UserThread);
@@ -193,11 +193,11 @@ mod tests {
         let edges = bad.all_edges();
         let eidx = edges[0].0;
         bad.edge_weight_mut(eidx).attributed_delay_ms = 999;
-        assert!(!is_conserved(&bad));
+        assert!(!invariants_ok(&g, &bad));
     }
 
     #[test]
-    fn verify_conservation_detects_locality_violation() {
+    fn verify_postconditions_detects_locality_violation() {
         let mut g = WaitForGraph::new();
         g.add_node(ThreadId(1), NodeKind::UserThread);
         g.add_node(ThreadId(2), NodeKind::UserThread);
@@ -207,7 +207,7 @@ mod tests {
         let mut bad = g.clone_with_reset_attribution();
         bad.add_node(ThreadId(3), NodeKind::UserThread);
         bad.add_edge(ThreadId(1), ThreadId(3), TimeWindow::new(0, 30));
-        assert!(verify_conservation(&g, &bad).is_err());
+        assert!(verify_engine_postconditions(&g, &bad).is_err());
     }
 
     #[test]
@@ -317,7 +317,7 @@ mod tests {
     }
 
     #[test]
-    fn verify_conservation_returns_ok_on_valid() {
+    fn verify_postconditions_returns_ok_on_valid() {
         use crate::cascade::engine::cascade_engine;
         let mut g = WaitForGraph::new();
         g.add_node(ThreadId(1), NodeKind::UserThread);
@@ -325,7 +325,7 @@ mod tests {
         g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 50));
 
         let result = cascade_engine(&g, None).unwrap();
-        assert!(verify_conservation(&g, &result).is_ok());
+        assert!(verify_engine_postconditions(&g, &result).is_ok());
     }
 
     #[test]

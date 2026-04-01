@@ -24,7 +24,7 @@ pub struct EdgeOutput {
 pub struct GraphMetrics {
     pub total_raw_wait_ms: u64,
     pub total_attributed_delay_ms: u64,
-    pub is_conserved: bool,
+    pub invariants_ok: bool,
     pub edge_count: usize,
     pub node_count: usize,
 }
@@ -50,7 +50,7 @@ impl CascadeResult {
             graph_metrics: GraphMetrics {
                 total_raw_wait_ms: total_raw,
                 total_attributed_delay_ms: total_attr,
-                is_conserved: invariants::is_conserved(result),
+                invariants_ok: invariants::invariants_ok(original, result),
                 edge_count: result.edge_count(),
                 node_count: result.node_count(),
             },
