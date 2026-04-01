@@ -298,4 +298,23 @@ mod tests {
         // T1→T2 and T2→T1 are internal
         assert_eq!(int_edges.len(), 2);
     }
+
+    #[test]
+    fn all_super_nodes_covers_all_threads() {
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_node(ThreadId(3), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 100));
+        g.add_edge(ThreadId(2), ThreadId(3), TimeWindow::new(20, 100));
+
+        let cdag = build_condensation(&g);
+        let all = cdag.all_super_nodes();
+        assert_eq!(all.len(), 3);
+        // Every thread appears in exactly one super-node
+        let all_members: Vec<_> = all.iter().flat_map(|(_, sn)| &sn.members).collect();
+        assert!(all_members.contains(&&ThreadId(1)));
+        assert!(all_members.contains(&&ThreadId(2)));
+        assert!(all_members.contains(&&ThreadId(3)));
+    }
 }
