@@ -180,6 +180,44 @@ mod tests {
     }
 
     #[test]
+    fn dp_arithmetic_uses_addition() {
+        // Construct a condensation DAG directly to test DP arithmetic
+        // without pipeline interference from heuristic weights.
+        use crate::scc::tarjan::{CondensationDag, SuperNode};
+        use petgraph::graph::DiGraph;
+
+        let mut dag: DiGraph<SuperNode, u64> = DiGraph::new();
+        let a = dag.add_node(SuperNode {
+            scc_index: 0,
+            members: vec![ThreadId(1)],
+            weight: 5,
+        });
+        let b = dag.add_node(SuperNode {
+            scc_index: 1,
+            members: vec![ThreadId(2)],
+            weight: 3,
+        });
+        let c = dag.add_node(SuperNode {
+            scc_index: 2,
+            members: vec![ThreadId(3)],
+            weight: 7,
+        });
+        dag.add_edge(a, b, 10);
+        dag.add_edge(b, c, 20);
+
+        let mut node_map = std::collections::BTreeMap::new();
+        node_map.insert(ThreadId(1), a);
+        node_map.insert(ThreadId(2), b);
+        node_map.insert(ThreadId(3), c);
+
+        let cdag = CondensationDag { dag, node_map };
+        let cp = critical_path_dp(&cdag).unwrap();
+        // dist[a]=5, dist[b]=5+10+3=18, dist[c]=18+20+7=45
+        assert_eq!(cp.total_weight, 45, "DP must use addition");
+        assert_eq!(cp.chain.len(), 3);
+    }
+
+    #[test]
     fn empty_dag() {
         let cdag = build_condensation(&WaitForGraph::new());
         assert!(critical_path_dp(&cdag).is_none());
