@@ -42,3 +42,38 @@ jobs:
 
       - name: differential (Rust vs Python)
         run: cargo test --test differential
+
+  mutants:
+    name: Mutation Testing (≥90% kill rate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants --locked
+
+      - name: Run cargo-mutants
+        run: cargo mutants --timeout=300 -j 2
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-report
+          path: mutants.out/
+
+      - name: Verify ≥90% kill rate
+        run: |
+          caught=$(wc -l < mutants.out/caught.txt)
+          missed=$(wc -l < mutants.out/missed.txt)
+          total=$((caught + missed))
+          rate=$(( (caught * 100) / total ))
+          echo "Kill rate: ${caught}/${total} = ${rate}%"
+          if [ "$rate" -lt 90 ]; then
+            echo "FAIL: kill rate ${rate}% < 90% threshold"
+            exit 1
+          fi

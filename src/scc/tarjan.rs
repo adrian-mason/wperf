@@ -32,7 +32,7 @@ pub struct SuperNode {
 /// Edges carry the max attributed_delay among parallel cross-SCC edges.
 pub struct CondensationDag {
     pub dag: DiGraph<SuperNode, u64>,
-    node_map: BTreeMap<ThreadId, NodeIndex>,
+    pub(crate) node_map: BTreeMap<ThreadId, NodeIndex>,
 }
 
 impl CondensationDag {
@@ -297,6 +297,17 @@ mod tests {
         let int_edges = internal_edges(&g, cycle);
         // T1→T2 and T2→T1 are internal
         assert_eq!(int_edges.len(), 2);
+    }
+
+    #[test]
+    fn scc_of_missing_thread_returns_none() {
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(1), NodeKind::UserThread);
+        g.add_node(ThreadId(2), NodeKind::UserThread);
+        g.add_edge(ThreadId(1), ThreadId(2), TimeWindow::new(0, 100));
+
+        let cdag = build_condensation(&g);
+        assert_eq!(cdag.scc_of(&ThreadId(999)), None);
     }
 
     #[test]
