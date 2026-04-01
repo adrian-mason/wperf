@@ -75,7 +75,10 @@ fn figure4_root_edge_conservation() {
 fn figure4_invariants_hold() {
     let g = figure4_graph();
     let result = cascade_engine(&g, None).unwrap();
-    assert!(invariants_ok(&g, &result), "invariants_ok sentinel must pass");
+    assert!(
+        invariants_ok(&g, &result),
+        "invariants_ok sentinel must pass"
+    );
 }
 
 #[test]
