@@ -4,7 +4,7 @@
 //! the cascade engine is broken.
 
 use wperf::cascade::engine::cascade_engine;
-use wperf::cascade::invariants::is_conserved;
+use wperf::cascade::invariants::invariants_ok;
 use wperf::graph::types::*;
 use wperf::graph::wfg::WaitForGraph;
 use wperf::output::CascadeResult;
@@ -75,7 +75,10 @@ fn figure4_root_edge_conservation() {
 fn figure4_invariants_hold() {
     let g = figure4_graph();
     let result = cascade_engine(&g, None).unwrap();
-    assert!(is_conserved(&result), "I-1 sentinel must pass");
+    assert!(
+        invariants_ok(&g, &result),
+        "invariants_ok sentinel must pass"
+    );
 }
 
 #[test]
@@ -84,13 +87,13 @@ fn figure4_json_output() {
     let result = cascade_engine(&g, None).unwrap();
     let output = CascadeResult::from_graph(&g, &result);
 
-    assert!(output.graph_metrics.is_conserved);
+    assert!(output.graph_metrics.invariants_ok);
     assert_eq!(output.graph_metrics.edge_count, 2);
     assert_eq!(output.graph_metrics.node_count, 3);
 
     // Verify JSON roundtrip
     let json = serde_json::to_string(&output).unwrap();
-    assert!(json.contains("\"is_conserved\":true"));
+    assert!(json.contains("\"invariants_ok\":true"));
 }
 
 /// Extended 3-node chain: User→Parser→Network→Disk.
@@ -132,7 +135,7 @@ fn extended_chain_attributed_values() {
     let total = up.3.attributed_delay_ms + pn.3.attributed_delay_ms + nd.3.attributed_delay_ms;
     assert_eq!(total, 100);
 
-    assert!(is_conserved(&result));
+    assert!(invariants_ok(&g, &result));
 }
 
 /// Single edge: leaf node gets full attribution.
@@ -146,7 +149,7 @@ fn single_edge_full_attribution() {
     let result = cascade_engine(&g, None).unwrap();
     let edges = result.all_edges();
     assert_eq!(edges[0].3.attributed_delay_ms, 50);
-    assert!(is_conserved(&result));
+    assert!(invariants_ok(&g, &result));
 }
 
 /// Disconnected components: each edge is independent.
@@ -175,5 +178,5 @@ fn disconnected_edges() {
     // Both are leaf edges — full attribution
     assert_eq!(e1.3.attributed_delay_ms, 50);
     assert_eq!(e2.3.attributed_delay_ms, 80);
-    assert!(is_conserved(&result));
+    assert!(invariants_ok(&g, &result));
 }

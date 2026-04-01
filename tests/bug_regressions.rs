@@ -4,7 +4,7 @@
 //! and verifies the fix produces correct output.
 
 use wperf::cascade::engine::cascade_engine;
-use wperf::cascade::invariants::is_conserved;
+use wperf::cascade::invariants::invariants_ok;
 use wperf::graph::types::*;
 use wperf::graph::wfg::WaitForGraph;
 
@@ -63,7 +63,7 @@ fn bug1_visited_path_scope() {
         "D→E must not be zero (BUG-1: E was skipped via D path)"
     );
 
-    assert!(is_conserved(&result));
+    assert!(invariants_ok(&g, &result));
 }
 
 /// BUG-2: propagated_down return value ignored.
@@ -100,7 +100,7 @@ fn bug2_propagated_down_ignored() {
     );
     assert_eq!(ab.3.attributed_delay_ms, 20);
 
-    assert!(is_conserved(&result));
+    assert!(invariants_ok(&g, &result));
 }
 
 /// BUG-3: multi-edge overlap double-counting.
@@ -143,7 +143,7 @@ fn bug3_multi_edge_overlap() {
     // B is idle during [80,100) → 20ms is B's direct fault
     assert_eq!(ab.3.attributed_delay_ms, 20);
 
-    assert!(is_conserved(&result));
+    assert!(invariants_ok(&g, &result));
 }
 
 /// BUG-4: BUG-2 + BUG-3 combined.
@@ -190,7 +190,7 @@ fn bug4_combined_bug2_bug3() {
         "B→C must propagate weight to E"
     );
 
-    assert!(is_conserved(&result));
+    assert!(invariants_ok(&g, &result));
 }
 
 /// NEW-BUG-1: leaf node zero blame.
@@ -219,5 +219,5 @@ fn new_bug1_leaf_node_zero_blame() {
         "NEW-BUG-1: leaf node must get full attribution"
     );
 
-    assert!(is_conserved(&result));
+    assert!(invariants_ok(&g, &result));
 }

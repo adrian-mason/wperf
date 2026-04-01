@@ -12,7 +12,7 @@ the Rust production implementation (src/graph/sweep.rs) is authoritative.
 This script is a validation fixture, not a general-purpose differential
 testing oracle. Phase 0 differential testing (Issue #20) should restrict
 test inputs to non-overlapping topologies when comparing against this
-script, and rely on I-1/I-2 invariant assertions for complex graphs.
+script, and rely on invariant assertions (I-2 through I-7, ADR-016) for complex graphs.
 
 Validates:
 1. SCC/Knot detection using NetworkX

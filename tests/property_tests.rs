@@ -1,4 +1,4 @@
-//! Property-based tests: 10K random graphs, all 7 invariants.
+//! Property-based tests: 10K random graphs, invariants I-2 through I-5, I-7 (ADR-016).
 //!
 //! Uses proptest to generate random WFGs biased toward realistic
 //! characteristics: sparse, mostly acyclic, depth 3-8.
@@ -8,7 +8,7 @@ use proptest::prelude::*;
 use wperf::cascade::engine::cascade_engine;
 use wperf::cascade::invariants::{
     check_idempotency, check_locality, check_non_amplification, check_non_negativity,
-    check_termination, is_conserved,
+    check_termination, invariants_ok,
 };
 use wperf::graph::types::*;
 use wperf::graph::wfg::WaitForGraph;
@@ -69,8 +69,8 @@ proptest! {
     fn all_invariants_hold(g in arb_wfg()) {
         let result = cascade_engine(&g, None).unwrap();
 
-        // I-1: Per-entry-edge conservation (non-amplification)
-        prop_assert!(is_conserved(&result), "I-1 (conservation) failed");
+        // Production sentinel: I-2 ∧ I-7 (ADR-016)
+        prop_assert!(invariants_ok(&g, &result), "invariants_ok (I-2 ∧ I-7) failed");
 
         // I-2: Non-amplification
         prop_assert!(check_non_amplification(&result), "I-2 (non-amplification) failed");
