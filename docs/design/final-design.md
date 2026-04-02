@@ -440,13 +440,13 @@ The following additions extend the verification strategy for Phase 1's data pipe
 |------|------|------|-------|
 | **Dependency hygiene** | `cargo-deny` + `cargo-audit` | Now (pre-Phase 1) | Supply-chain risk, not correctness verification; especially important with `libbpf-rs` / `libbpf-sys` |
 | **Coverage visibility** | `cargo-llvm-cov` | Now (pre-Phase 1) | Visibility tool only — no coverage percentage gate; mutation testing remains the correctness signal |
-| **Benchmark framework** | `criterion` + `iai-callgrind` (nightly) | Framework now; overhead gating after transport lands | `criterion` for engine/parser baselines; `iai-callgrind` for deterministic nightly; real `<3% CPU` overhead measurement after P1-05/P1-06 |
+| **Benchmark framework** | `criterion` + `iai-callgrind` (nightly) | Framework now; overhead gating after transport lands | `criterion` for engine/parser baselines; `iai-callgrind` for deterministic nightly; real `<3% CPU` overhead measurement after Phase 1 W1-W2 (BPF probes + transport) |
 
 **Conditional items** (triggered by code shape, with explicit criteria):
 
 | Item | Trigger Condition | Action |
 |------|-------------------|--------|
-| **Loom** | P1-06 transport introduces userspace shared-state concurrency (multi-thread shared state, lock-free queues, atomic coordination) | Evaluate immediately after transport architecture solidifies; if single-thread poll loop + channel → skip |
+| **Loom** | Phase 1 transport (W1-W2) introduces userspace shared-state concurrency (multi-thread shared state, lock-free queues, atomic coordination) | Evaluate immediately after transport architecture solidifies; if single-thread poll loop + channel → skip |
 | **`cargo-hack --feature-powerset`** | Feature matrix ≥ 3 non-trivial features | Add to CI when triggered |
 
 ### 6.2 Production Sentinel + Invariants
@@ -562,7 +562,7 @@ Phase 3 (Stack Collection + Production HTML)    Weeks 13–16
 | **Phase 3** | Stack depth ≥ 5 frames (with FP); Dagre layout renders; flamegraph functions readable; total overhead < 5% CPU | Automated + manual |
 
 **Phase 1 verification notes (not exit criteria):**
-- *Non-blocking CI items:* fuzz targets (cargo-fuzz, gate promotion deferred); sanitizers (nightly, infra-dependent); benchmark baselines (criterion, overhead gating deferred)
+- *Non-blocking CI items:* fuzz targets (cargo-fuzz, gate promotion deferred); sanitizers (nightly, infra-dependent); benchmark framework automation (criterion, per-PR CI gating deferred)
 - *CI / release hygiene:* `cargo-deny` + `cargo-audit`; `cargo-llvm-cov` (coverage visibility only, not a gate)
 - *Conditional:* evaluate loom after transport design solidifies
 
