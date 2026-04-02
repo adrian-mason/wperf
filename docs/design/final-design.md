@@ -533,7 +533,8 @@ Phase 1 (Minimal Data Pipeline)                Weeks 5–8
 ├── W3: Pipeline integration + JSON output + minimal visualization (dot SVG)
 ├── W4: E2E testing + overhead baseline + crash recovery
 ├── Verification: snapshot/golden tests (insta) + fixture-driven integration tests
-├── Verification: Miri + sanitizers (converge with first unsafe/FFI boundary code)
+├── Verification: Miri (converge with first unsafe/FFI boundary code)
+├── Verification: sanitizers (nightly, infra-dependent — may converge later than Miri)
 ├── Verification: benchmark framework (criterion) — overhead gating after transport
 └── Verification enhancement: input boundary fuzz targets (cargo-fuzz, nightly CI)
 
@@ -555,7 +556,7 @@ Phase 3 (Stack Collection + Production HTML)    Weeks 13–16
 |------|-------------------|--------|
 | **Gate 0** | A: matched switch/wakeup pairs; B: Figure 4 exact match; C: 10-event roundtrip + truncation recovery | Manual |
 | **Phase 0** | `invariants_ok` (I-2 ∧ I-7) 0 violations on all test graphs; I-2 through I-5, I-7 verified by 10K proptest with 0 violations; I-6 verified by unit tests on simple chains; 5 bug regressions pass; vs Python ≤1.0ms (6 fixed scenarios); mutation ≥90% ([ADR-016](../decisions/ADR-016.md)) | **Automated** |
-| **Phase 1** | 2-thread mutex Knot detected; `invariants_ok==true` on real BPF data; all 5 coverage metrics exported in JSON; overhead <3% CPU (stress-ng 64 threads); crash recovery passes; minimal SVG readable; snapshot/golden tests cover JSON + `.wperf` output; fixture replay tests pass for parser → output; `cargo-deny` + `cargo-audit` clean; Miri clean on unsafe/FFI boundary code. *Non-blocking:* fuzz targets (cargo-fuzz, gate promotion deferred); sanitizers (nightly, infra-dependent); benchmark baselines (criterion, overhead gating deferred); coverage report (cargo-llvm-cov, visibility only). *Conditional:* evaluate loom after transport design solidifies | Automated + manual review |
+| **Phase 1** | 2-thread mutex Knot detected; `invariants_ok==true` on real BPF data; all 5 coverage metrics exported in JSON; overhead <3% CPU (stress-ng 64 threads); crash recovery passes; minimal SVG readable; snapshot/golden tests cover JSON + `.wperf` output; fixture replay tests pass for parser → output; Miri clean on unsafe/FFI boundary code. *Non-blocking:* fuzz targets (cargo-fuzz, gate promotion deferred); sanitizers (nightly, infra-dependent); benchmark baselines (criterion, overhead gating deferred); coverage report (cargo-llvm-cov, visibility only); `cargo-deny` + `cargo-audit` (CI hygiene, not exit criteria). *Conditional:* evaluate loom after transport design solidifies | Automated + manual review |
 | **Phase 2a** | Correct futex wait_type annotation; spurious wakeups filtered; `invariants_ok` preserved | Automated |
 | **Phase 2b** | IO pseudo-thread `attributed_delay ≥ 70%`; no spurious Knots from synthetic edges; `invariants_ok` preserved | Automated + manual review |
 | **Phase 3** | Stack depth ≥ 5 frames (with FP); Dagre layout renders; flamegraph functions readable; total overhead < 5% CPU | Automated + manual |
