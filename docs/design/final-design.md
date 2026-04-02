@@ -417,6 +417,7 @@ This ensures users can calibrate their confidence in the analysis based on empir
 | **L3: Property-Based Testing** | proptest random graph generation | Week 2 | 10,000+ random topologies |
 | **L4: Differential Testing** | Rust vs Python cascade oracle (`cascade_oracle.py`, ADR-007 pseudocode) | Week 2-3 | ≤1.0ms tolerance |
 | **L5: Mutation Testing** | cargo-mutants kill rate | Week 3 | ≥90% mutation detection |
+| **L6: Fuzz Testing** | cargo-fuzz on parser/transport input boundaries | Phase 1 (when APIs stabilize) | No panics/hangs on adversarial input (nightly CI, non-blocking enhancement) |
 
 ### 6.2 Production Sentinel + Invariants
 
@@ -499,7 +500,8 @@ Phase 1 (Minimal Data Pipeline)                Weeks 5–8
 ├── W1: wperf record (BPF probes + .wperf format)
 ├── W2: wperf report (state machine + graph construction)
 ├── W3: Pipeline integration + JSON output + minimal visualization (dot SVG)
-└── W4: E2E testing + overhead baseline + crash recovery
+├── W4: E2E testing + overhead baseline + crash recovery
+└── Verification enhancement: input boundary fuzz targets (cargo-fuzz, nightly CI)
 
 Phase 2a (Wait Cause Annotation)               Weeks 9–10
 └── sys_enter_futex + spurious wakeup filtering (no graph topology change)
@@ -519,7 +521,7 @@ Phase 3 (Stack Collection + Production HTML)    Weeks 13–16
 |------|-------------------|--------|
 | **Gate 0** | A: matched switch/wakeup pairs; B: Figure 4 exact match; C: 10-event roundtrip + truncation recovery | Manual |
 | **Phase 0** | `invariants_ok` (I-2 ∧ I-7) 0 violations on all test graphs; I-2 through I-5, I-7 verified by 10K proptest with 0 violations; I-6 verified by unit tests on simple chains; 5 bug regressions pass; vs Python ≤1.0ms (6 fixed scenarios); mutation ≥90% ([ADR-016](../decisions/ADR-016.md)) | **Automated** |
-| **Phase 1** | 2-thread mutex Knot detected; `invariants_ok==true` on real BPF data; all 5 coverage metrics exported in JSON; overhead <3% CPU (stress-ng 64 threads); crash recovery passes; minimal SVG readable | Automated + manual review |
+| **Phase 1** | 2-thread mutex Knot detected; `invariants_ok==true` on real BPF data; all 5 coverage metrics exported in JSON; overhead <3% CPU (stress-ng 64 threads); crash recovery passes; minimal SVG readable. *Verification enhancement (non-blocking):* fuzz targets for parser/transport input boundaries (cargo-fuzz); gate promotion deferred until cost/signal evaluated | Automated + manual review |
 | **Phase 2a** | Correct futex wait_type annotation; spurious wakeups filtered; `invariants_ok` preserved | Automated |
 | **Phase 2b** | IO pseudo-thread `attributed_delay ≥ 70%`; no spurious Knots from synthetic edges; `invariants_ok` preserved | Automated + manual review |
 | **Phase 3** | Stack depth ≥ 5 frames (with FP); Dagre layout renders; flamegraph functions readable; total overhead < 5% CPU | Automated + manual |
