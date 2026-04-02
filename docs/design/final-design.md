@@ -417,7 +417,8 @@ This ensures users can calibrate their confidence in the analysis based on empir
 | **L3: Property-Based Testing** | proptest random graph generation | Week 2 | 10,000+ random topologies |
 | **L4: Differential Testing** | Rust vs Python cascade oracle (`cascade_oracle.py`, ADR-007 pseudocode) | Week 2-3 | ≤1.0ms tolerance |
 | **L5: Mutation Testing** | cargo-mutants kill rate | Week 3 | ≥90% mutation detection |
-| **L6: Fuzz Testing** | cargo-fuzz on parser/transport input boundaries | Phase 1 (when APIs stabilize) | No panics/hangs on adversarial input (nightly CI, non-blocking enhancement) |
+
+**Phase 1 verification enhancement (non-blocking):** Fuzz testing (`cargo-fuzz`) on parser/transport input boundaries, targeting panic-freedom and no hangs on adversarial input. Introduced when APIs stabilize; nightly CI; gate promotion deferred until cost/signal evaluated. Not part of the core five-layer pyramid (ADR-007).
 
 ### 6.2 Production Sentinel + Invariants
 
