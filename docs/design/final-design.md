@@ -556,15 +556,15 @@ Phase 3 (Stack Collection + Production HTML)    Weeks 13–16
 |------|-------------------|--------|
 | **Gate 0** | A: matched switch/wakeup pairs; B: Figure 4 exact match; C: 10-event roundtrip + truncation recovery | Manual |
 | **Phase 0** | `invariants_ok` (I-2 ∧ I-7) 0 violations on all test graphs; I-2 through I-5, I-7 verified by 10K proptest with 0 violations; I-6 verified by unit tests on simple chains; 5 bug regressions pass; vs Python ≤1.0ms (6 fixed scenarios); mutation ≥90% ([ADR-016](../decisions/ADR-016.md)) | **Automated** |
-| **Phase 1** | 2-thread mutex Knot detected; `invariants_ok==true` on real BPF data; all 5 coverage metrics exported in JSON; overhead <3% CPU (stress-ng 64 threads); crash recovery passes; minimal SVG readable; snapshot/golden tests cover JSON + `.wperf` output; fixture replay tests pass for parser → output; Miri clean on unsafe/FFI boundary code (see Phase 1 verification notes below) | Automated + manual review |
+| **Phase 1** | 2-thread mutex Knot detected; `invariants_ok==true` on real BPF data; all 5 coverage metrics exported in JSON; overhead <3% CPU (stress-ng 64 threads); crash recovery passes; minimal SVG readable; snapshot/golden tests cover JSON + `.wperf` output; fixture replay tests pass for parser → output; Miri clean on unsafe/FFI boundary code | Automated + manual review |
+| **Phase 2a** | Correct futex wait_type annotation; spurious wakeups filtered; `invariants_ok` preserved | Automated |
+| **Phase 2b** | IO pseudo-thread `attributed_delay ≥ 70%`; no spurious Knots from synthetic edges; `invariants_ok` preserved | Automated + manual review |
+| **Phase 3** | Stack depth ≥ 5 frames (with FP); Dagre layout renders; flamegraph functions readable; total overhead < 5% CPU | Automated + manual |
 
 **Phase 1 verification notes (not exit criteria):**
 - *Non-blocking CI items:* fuzz targets (cargo-fuzz, gate promotion deferred); sanitizers (nightly, infra-dependent); benchmark baselines (criterion, overhead gating deferred)
 - *CI / release hygiene:* `cargo-deny` + `cargo-audit`; `cargo-llvm-cov` (coverage visibility only, not a gate)
 - *Conditional:* evaluate loom after transport design solidifies
-| **Phase 2a** | Correct futex wait_type annotation; spurious wakeups filtered; `invariants_ok` preserved | Automated |
-| **Phase 2b** | IO pseudo-thread `attributed_delay ≥ 70%`; no spurious Knots from synthetic edges; `invariants_ok` preserved | Automated + manual review |
-| **Phase 3** | Stack depth ≥ 5 frames (with FP); Dagre layout renders; flamegraph functions readable; total overhead < 5% CPU | Automated + manual |
 
 ### 7.4 Three Prohibitions + Rollback Strategy
 
