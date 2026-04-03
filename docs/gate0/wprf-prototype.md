@@ -75,4 +75,4 @@ The `data_section_end_offset` field in the header is set to the byte position af
 
 2. **Forward compatibility via TLV (design-level).** The TLV format supports skipping unknown `rec_type` values by reading `length` bytes. The prototype's `read_tlv()` returns an error on unknown types rather than implementing skip-and-continue; full forward-compatibility skip logic is deferred to Phase 1 production reader.
 
-3. **No alignment issues.** The 23-byte BaseEvent is intentionally unaligned (no padding). All fields use `to_le_bytes()`/`from_le_bytes()` for portability. This matches the design spec's fixed-length approach.
+3. **No alignment issues (Gate 0 context).** The 23-byte BaseEvent used in this prototype was intentionally unaligned (no padding), with all fields serialized via `to_le_bytes()`/`from_le_bytes()` for portability. This was sufficient for validating TLV/crash-recovery mechanics, but is superseded by the 40-byte naturally-aligned Phase 1 `wperf_event` format due to BPF verifier constraints (see amendment note above).
