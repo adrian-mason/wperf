@@ -46,7 +46,7 @@ let rb = RingBufferBuilder::new()
     .build()?;
 ```
 
-Single file descriptor. Global FIFO ordering guaranteed. Callback signature: `fn(data: &[u8]) -> i32` — no CPU index parameter (CPU must be embedded in event data, which wPerf's BaseEvent already includes).
+Single file descriptor. Global FIFO ordering guaranteed. Callback signature: `fn(data: &[u8]) -> i32` — no CPU index parameter (CPU must be embedded in event data, which wPerf's `wperf_event` struct already includes via the `cpu` field).
 
 **Perfarray path:**
 ```rust

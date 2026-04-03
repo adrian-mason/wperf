@@ -4,6 +4,11 @@
 - **Date:** 2026-03-22
 - **Pass criteria:** 10-event roundtrip + truncation recovery of first N events
 
+> **Note (Phase 1 amendment):** This prototype used a 23-byte BaseEvent for format validation.
+> Phase 1 adopts a 40-byte naturally-aligned `wperf_event` struct (see final-design.md §2.4)
+> due to BPF verifier constraints on packed structs. The TLV + crash recovery + footer
+> mechanisms validated here remain unchanged; only the per-event payload size differs.
+
 ## Test Results
 
 ```
