@@ -420,6 +420,35 @@ This ensures users can calibrate their confidence in the analysis based on empir
 
 **Phase 1 verification enhancement (non-blocking):** Fuzz testing (`cargo-fuzz`) on parser/transport input boundaries, targeting panic-freedom and no hangs on adversarial input. Introduced when APIs stabilize; nightly CI; gate promotion deferred until cost/signal evaluated. Not part of the core five-layer pyramid (ADR-007).
 
+#### Phase 1 Verification Additions
+
+The following additions extend the verification strategy for Phase 1's data pipeline, informed by Phase 0 experience (semantic drift is the primary failure mode, not UB).
+
+**Confirmed verification items** (land with corresponding module):
+
+| Item | Tool / Approach | Lands With | Notes |
+|------|----------------|------------|-------|
+| **Snapshot / golden tests** | `insta` or `expect-test` | JSON output, `.wperf` format, CLI text | Highest priority — cheapest defense against semantic drift (Phase 0 lesson: I-1 misspecification) |
+| **Fixture-driven integration tests** | Real / constructed event stream replay | Parser, correlation, graph-builder | End-to-end replay through parser → correlation → graph-builder → output; higher priority than memory-safety tooling |
+| **Miri** | `cargo +nightly miri test` | First unsafe/FFI boundary code | Targets event deserialization layer (`&[u8]` → typed struct, raw pointer → slice, lifetime management); not a kickoff blocker — converge with first unsafe boundary code; sequenced after snapshot/fixture tests |
+| **Sanitizers (ASan/TSan)** | `-Zsanitizer=address,thread` | FFI / mmap code (nightly CI) | Nightly, infra-dependent — confirmed item but not a day-one gate; runner/toolchain constraints may require convergence time |
+| **Fuzz** | `cargo-fuzz` | Per existing roadmap | Parser/transport/graph-builder boundaries first; non-blocking |
+
+**Confirmed infrastructure items** (separate from correctness verification):
+
+| Item | Tool | When | Notes |
+|------|------|------|-------|
+| **Dependency hygiene** | `cargo-deny` + `cargo-audit` | Now (pre-Phase 1) | Supply-chain risk, not correctness verification; especially important with `libbpf-rs` / `libbpf-sys` |
+| **Coverage visibility** | `cargo-llvm-cov` | Now (pre-Phase 1) | Visibility tool only — no coverage percentage gate; mutation testing remains the correctness signal |
+| **Benchmark framework** | `criterion` + `iai-callgrind` (nightly) | Framework now; overhead gating after transport lands | `criterion` for engine/parser baselines; `iai-callgrind` for deterministic nightly; real `<3% CPU` overhead measurement after Phase 1 W1-W2 (BPF probes + transport) |
+
+**Conditional items** (triggered by code shape, with explicit criteria):
+
+| Item | Trigger Condition | Action |
+|------|-------------------|--------|
+| **Loom** | Phase 1 transport (W1-W2) introduces userspace shared-state concurrency (multi-thread shared state, lock-free queues, atomic coordination) | Evaluate immediately after transport architecture solidifies; if single-thread poll loop + channel → skip |
+| **`cargo-hack --feature-powerset`** | Feature matrix ≥ 3 non-trivial features | Add to CI when triggered |
+
 ### 6.2 Production Sentinel + Invariants
 
 The production sentinel `invariants_ok` (I-2 non-amplification ∧ I-7 locality) is a structural postcondition guard that runs in all builds. It catches 0/5 known bugs by construction (I-2 is unfalsifiable via `saturating_sub`; I-7 checks topology only). Known-bug detection relies on the full verification stack: regression tests, proptest, differential oracle, and mutation testing. See [ADR-016](../decisions/ADR-016.md).
@@ -498,10 +527,15 @@ Phase 0 (Cascade Correctness)                  Weeks 2–4
 └── W3: Differential vs Python + mutation testing
 
 Phase 1 (Minimal Data Pipeline)                Weeks 5–8
+├── Pre-kickoff: cargo-deny + cargo-audit + cargo-llvm-cov in CI
 ├── W1: wperf record (BPF probes + .wperf format)
 ├── W2: wperf report (state machine + graph construction)
 ├── W3: Pipeline integration + JSON output + minimal visualization (dot SVG)
 ├── W4: E2E testing + overhead baseline + crash recovery
+├── Verification: snapshot/golden tests (insta) + fixture-driven integration tests
+├── Verification: Miri (converge with first unsafe/FFI boundary code)
+├── Verification: sanitizers (nightly, infra-dependent — may converge later than Miri)
+├── Verification: benchmark framework (criterion) — overhead gating after transport
 └── Verification enhancement: input boundary fuzz targets (cargo-fuzz, nightly CI)
 
 Phase 2a (Wait Cause Annotation)               Weeks 9–10
@@ -522,10 +556,15 @@ Phase 3 (Stack Collection + Production HTML)    Weeks 13–16
 |------|-------------------|--------|
 | **Gate 0** | A: matched switch/wakeup pairs; B: Figure 4 exact match; C: 10-event roundtrip + truncation recovery | Manual |
 | **Phase 0** | `invariants_ok` (I-2 ∧ I-7) 0 violations on all test graphs; I-2 through I-5, I-7 verified by 10K proptest with 0 violations; I-6 verified by unit tests on simple chains; 5 bug regressions pass; vs Python ≤1.0ms (6 fixed scenarios); mutation ≥90% ([ADR-016](../decisions/ADR-016.md)) | **Automated** |
-| **Phase 1** | 2-thread mutex Knot detected; `invariants_ok==true` on real BPF data; all 5 coverage metrics exported in JSON; overhead <3% CPU (stress-ng 64 threads); crash recovery passes; minimal SVG readable. *Verification enhancement (non-blocking):* fuzz targets for parser/transport input boundaries (cargo-fuzz); gate promotion deferred until cost/signal evaluated | Automated + manual review |
+| **Phase 1** | 2-thread mutex Knot detected; `invariants_ok==true` on real BPF data; all 5 coverage metrics exported in JSON; overhead <3% CPU (stress-ng 64 threads); crash recovery passes; minimal SVG readable; snapshot/golden tests cover JSON + `.wperf` output; fixture replay tests pass for parser → output; Miri clean on unsafe/FFI boundary code | Automated + manual review |
 | **Phase 2a** | Correct futex wait_type annotation; spurious wakeups filtered; `invariants_ok` preserved | Automated |
 | **Phase 2b** | IO pseudo-thread `attributed_delay ≥ 70%`; no spurious Knots from synthetic edges; `invariants_ok` preserved | Automated + manual review |
 | **Phase 3** | Stack depth ≥ 5 frames (with FP); Dagre layout renders; flamegraph functions readable; total overhead < 5% CPU | Automated + manual |
+
+**Phase 1 verification notes (not exit criteria):**
+- *Non-blocking CI items:* fuzz targets (cargo-fuzz, gate promotion deferred); sanitizers (nightly, infra-dependent); benchmark framework automation (criterion, per-PR CI gating deferred)
+- *CI / release hygiene:* `cargo-deny` + `cargo-audit`; `cargo-llvm-cov` (coverage visibility only, not a gate)
+- *Conditional:* evaluate loom after transport design solidifies
 
 ### 7.4 Three Prohibitions + Rollback Strategy
 
