@@ -5,7 +5,7 @@
 
 use petgraph::graph::NodeIndex;
 
-use crate::graph::types::*;
+use crate::graph::types::{NodeKind, ThreadId};
 use crate::graph::wfg::WaitForGraph;
 
 use super::tarjan::CondensationDag;
@@ -30,7 +30,7 @@ pub fn detect_knots(cdag: &CondensationDag, graph: &WaitForGraph) -> Vec<Knot> {
             let sn = cdag.super_node(idx);
 
             // Rule 1: exclude trivial singletons (no self-loop)
-            if sn.members.len() == 1 && !has_self_loop(graph, &sn.members[0]) {
+            if sn.members.len() == 1 && !has_self_loop(graph, sn.members[0]) {
                 return false;
             }
 
@@ -52,11 +52,14 @@ pub fn detect_knots(cdag: &CondensationDag, graph: &WaitForGraph) -> Vec<Knot> {
 }
 
 /// Check if a thread has a self-loop in the WFG.
-fn has_self_loop(graph: &WaitForGraph, tid: &ThreadId) -> bool {
+fn has_self_loop(graph: &WaitForGraph, tid: ThreadId) -> bool {
+    let Some(idx) = graph.node_index(&tid) else {
+        return false;
+    };
     graph
-        .all_edges()
+        .outgoing_edges(idx)
         .iter()
-        .any(|(_, src, dst, _)| src == tid && dst == tid)
+        .any(|(_, dst, _)| *dst == tid)
 }
 
 /// Check if ALL members of an SCC are kernel threads.
@@ -70,6 +73,7 @@ fn is_pure_kernel_scc(graph: &WaitForGraph, members: &[ThreadId]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::types::TimeWindow;
     use crate::scc::tarjan::build_condensation;
 
     #[test]

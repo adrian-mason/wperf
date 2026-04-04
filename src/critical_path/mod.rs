@@ -31,7 +31,7 @@ pub struct CriticalPathNode {
 /// Compute the critical (longest) path through the condensation DAG.
 ///
 /// Algorithm: topological sort + DP.
-/// For each node in topo order: dist[v] = max(dist[u] + edge_weight + v.weight)
+/// For each node in topo order: dist[v] = max(dist[u] + `edge_weight` + v.weight)
 /// over all predecessors u.
 ///
 /// Returns None if the DAG is empty.
@@ -40,12 +40,9 @@ pub fn critical_path_dp(cdag: &CondensationDag) -> Option<CriticalPath> {
         return None;
     }
 
-    let topo = match toposort(&cdag.dag, None) {
-        Ok(order) => order,
-        Err(_) => {
-            // Should never happen — condensation is acyclic by construction
-            panic!("condensation DAG has a cycle — this is a bug");
-        }
+    let Ok(topo) = toposort(&cdag.dag, None) else {
+        // Should never happen — condensation is acyclic by construction
+        panic!("condensation DAG has a cycle — this is a bug");
     };
 
     let node_count = cdag.dag.node_count();
@@ -232,7 +229,7 @@ mod tests {
             g.add_node(ThreadId(i), NodeKind::UserThread);
         }
         for i in 0..99i64 {
-            let start = (i * 10) as u64;
+            let start = i.unsigned_abs() * 10;
             let end = start + 100;
             g.add_edge(ThreadId(i), ThreadId(i + 1), TimeWindow::new(start, end));
         }

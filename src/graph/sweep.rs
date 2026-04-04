@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 
-use super::types::*;
+use super::types::{ElementaryInterval, ThreadId, TimeWindow};
 use super::wfg::WaitForGraph;
 
 use petgraph::Direction;
@@ -19,7 +19,7 @@ use petgraph::visit::EdgeRef;
 /// 1. Clip each outgoing edge to its intersection with `window`
 /// 2. Collect all distinct start/end points
 /// 3. Sweep left-to-right: between consecutive points, emit an
-///    ElementaryInterval listing active targets
+///    `ElementaryInterval` listing active targets
 ///
 /// Returns empty Vec if no outgoing edges overlap `window`.
 pub fn sweep_line_partition(
@@ -27,9 +27,8 @@ pub fn sweep_line_partition(
     node: ThreadId,
     window: &TimeWindow,
 ) -> Vec<ElementaryInterval> {
-    let node_idx = match graph.node_index(&node) {
-        Some(idx) => idx,
-        None => return Vec::new(),
+    let Some(node_idx) = graph.node_index(&node) else {
+        return Vec::new();
     };
 
     // Collect clipped intervals: (clipped_window, target_tid)

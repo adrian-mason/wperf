@@ -39,11 +39,11 @@ fn arb_wfg() -> impl Strategy<Value = WaitForGraph> {
                 } else {
                     match i % 5 {
                         0 => NodeKind::KernelThread,
-                        1 | 2 | 3 => NodeKind::UserThread,
+                        1..=3 => NodeKind::UserThread,
                         _ => NodeKind::PseudoDisk,
                     }
                 };
-                g.add_node(ThreadId(i as i64), kind);
+                g.add_node(ThreadId(i64::try_from(i).unwrap()), kind);
             }
 
             for (src, dst, start, dur) in edges {
@@ -51,8 +51,8 @@ fn arb_wfg() -> impl Strategy<Value = WaitForGraph> {
                     // Skip self-loops for simpler graphs
                     let end = start + dur;
                     g.add_edge(
-                        ThreadId(src as i64),
-                        ThreadId(dst as i64),
+                        ThreadId(i64::try_from(src).unwrap()),
+                        ThreadId(i64::try_from(dst).unwrap()),
                         TimeWindow::new(start, end),
                     );
                 }

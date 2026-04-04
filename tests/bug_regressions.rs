@@ -8,12 +8,12 @@ use wperf::cascade::invariants::invariants_ok;
 use wperf::graph::types::*;
 use wperf::graph::wfg::WaitForGraph;
 
-/// BUG-1: visited_path scope leak across DFS branches.
+/// BUG-1: `visited_path` scope leak across DFS branches.
 ///
 /// Bug mechanism: if the cycle-detection path set persists across
 /// sibling branches in the DFS tree, a node reachable via two paths
 /// is incorrectly skipped on the second visit. The fix uses
-/// path.insert()/path.remove() so each branch gets a clean path.
+/// `path.insert()/path.remove()` so each branch gets a clean path.
 ///
 /// Graph: A→B [0,100), B→C [0,50), B→D [50,100), C→E [0,50), D→E [50,100)
 /// E is reachable from B via C and via D in different time windows.
@@ -66,10 +66,10 @@ fn bug1_visited_path_scope() {
     assert!(invariants_ok(&g, &result));
 }
 
-/// BUG-2: propagated_down return value ignored.
+/// BUG-2: `propagated_down` return value ignored.
 ///
 /// Bug mechanism: if the parent does not subtract the weight
-/// propagated to its children, it claims the full raw_wait
+/// propagated to its children, it claims the full `raw_wait`
 /// as its own attribution — inflating blame on intermediate nodes.
 ///
 /// Graph: A→B [0,100), B→C [20,100)
@@ -149,7 +149,7 @@ fn bug3_multi_edge_overlap() {
 /// BUG-4: BUG-2 + BUG-3 combined.
 ///
 /// Bug mechanism: chain with overlapping edges at intermediate node
-/// triggers both propagated_down ignored AND double-counting.
+/// triggers both `propagated_down` ignored AND double-counting.
 ///
 /// Graph: A→B [0,100), B→C [0,60), B→D [20,80), C→E [0,60)
 /// Both bugs amplify the error at intermediate nodes.
@@ -196,7 +196,7 @@ fn bug4_combined_bug2_bug3() {
 /// NEW-BUG-1: leaf node zero blame.
 ///
 /// Bug mechanism: when a node has no outgoing edges (leaf),
-/// compute_cascade returns 0 propagated. If the parent uses
+/// `compute_cascade` returns 0 propagated. If the parent uses
 /// only the propagated value (not interval duration) to determine
 /// how much the child absorbs, the leaf gets zero credit and
 /// the parent keeps all the blame.
