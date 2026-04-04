@@ -197,12 +197,13 @@ pub fn probe_ringbuf() -> Result<TransportMode, ProbeError> {
     use libbpf_rs::MapType;
 
     // Attempt to create a minimal ringbuf map. Page-size is the minimum.
-    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u32;
-    let opts = libbpf_rs::MapBuilder::new()
-        .map_type(MapType::RingBuf)
-        .max_entries(page_size);
+    // Mirrors trace_helpers.c probe_ringbuf(): bpf_map_create(RINGBUF, NULL, 0, 0, page_size, NULL)
+    let page_size_raw = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    let page_size = u32::try_from(page_size_raw).unwrap_or(4096);
+    let mut opts: libbpf_sys::bpf_map_create_opts = unsafe { std::mem::zeroed() };
+    opts.sz = std::mem::size_of::<libbpf_sys::bpf_map_create_opts>() as libbpf_sys::size_t;
 
-    match opts.create() {
+    match libbpf_rs::MapHandle::create(MapType::RingBuf, None::<&str>, 0, 0, page_size, &opts) {
         Ok(_map) => Ok(TransportMode::RingBuf), // fd closed on drop
         Err(_) => Ok(TransportMode::PerfArray),
     }
@@ -301,16 +302,31 @@ pub fn probe_fentry() -> Result<bool, ProbeError> {
 /// # Errors
 ///
 /// Returns `ProbeError::BtfRequired` if BTF is not available (hard requirement).
-/// Other probe failures result in degraded features, not errors.
+/// Other probe failures degrade gracefully to the fallback value, with a
+/// diagnostic printed to stderr. This is intentional: a probe that fails
+/// unexpectedly (e.g., `EPERM` on `bpf_map_create`) is treated the same as
+/// "feature not available" — the tool still runs, just with reduced capabilities.
 pub fn probe_all(paths: &ProbePaths<'_>) -> Result<FeatureMatrix, ProbeError> {
     // BTF is a hard requirement — fail fast.
     probe_btf(paths)?;
 
-    let transport = probe_ringbuf().unwrap_or(TransportMode::PerfArray);
-    let tracepoint = probe_tp_btf().unwrap_or(TracepointMode::RawTp);
-    let has_bpf_loop = probe_bpf_loop().unwrap_or(false);
+    let transport = probe_ringbuf().unwrap_or_else(|e| {
+        eprintln!("probe: ringbuf probe failed ({e}), falling back to perfarray");
+        TransportMode::PerfArray
+    });
+    let tracepoint = probe_tp_btf().unwrap_or_else(|e| {
+        eprintln!("probe: tp_btf probe failed ({e}), falling back to raw_tp");
+        TracepointMode::RawTp
+    });
+    let has_bpf_loop = probe_bpf_loop().unwrap_or_else(|e| {
+        eprintln!("probe: bpf_loop probe failed ({e}), assuming unavailable");
+        false
+    });
     let has_cgroupv2 = probe_cgroupv2(paths);
-    let has_fentry = probe_fentry().unwrap_or(false);
+    let has_fentry = probe_fentry().unwrap_or_else(|e| {
+        eprintln!("probe: fentry probe failed ({e}), assuming unavailable");
+        false
+    });
 
     Ok(FeatureMatrix {
         transport,
