@@ -229,7 +229,7 @@ mod tests {
             g.add_node(ThreadId(i), NodeKind::UserThread);
         }
         for i in 0..99i64 {
-            let start = (i * 10) as u64;
+            let start = i.unsigned_abs() * 10;
             let end = start + 100;
             g.add_edge(ThreadId(i), ThreadId(i + 1), TimeWindow::new(start, end));
         }
