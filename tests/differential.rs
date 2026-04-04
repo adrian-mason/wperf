@@ -1,7 +1,7 @@
 //! Differential testing: Rust vs Python oracle.
 //!
 //! Runs the same synthetic graphs through both implementations and
-//! verifies per-edge attributed_delay agrees within 1.0ms tolerance.
+//! verifies per-edge `attributed_delay` agrees within 1.0ms tolerance.
 
 use std::process::Command;
 
@@ -113,25 +113,19 @@ fn compare_results(rust_graph: &WaitForGraph, python: &OracleOutput, test_name: 
     assert_eq!(
         rust_edges.len(),
         python.edges.len(),
-        "{}: edge count mismatch",
-        test_name
+        "{test_name}: edge count mismatch"
     );
 
     for (i, (_, src, dst, ew)) in rust_edges.iter().enumerate() {
         let py = &python.edges[i];
-        assert_eq!(src.0, py.src, "{}: edge {} src mismatch", test_name, i);
-        assert_eq!(dst.0, py.dst, "{}: edge {} dst mismatch", test_name, i);
+        assert_eq!(src.0, py.src, "{test_name}: edge {i} src mismatch");
+        assert_eq!(dst.0, py.dst, "{test_name}: edge {i} dst mismatch");
         assert_eq!(
             ew.raw_wait_ms, py.raw_wait_ms,
-            "{}: edge {} raw_wait mismatch",
-            test_name, i
+            "{test_name}: edge {i} raw_wait mismatch"
         );
 
-        let diff = if ew.attributed_delay_ms > py.attributed_delay_ms {
-            ew.attributed_delay_ms - py.attributed_delay_ms
-        } else {
-            py.attributed_delay_ms - ew.attributed_delay_ms
-        };
+        let diff = ew.attributed_delay_ms.abs_diff(py.attributed_delay_ms);
 
         assert!(
             diff <= TOLERANCE_MS,
