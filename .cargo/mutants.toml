@@ -1,0 +1,21 @@
+# cargo-mutants configuration
+# See https://mutants.rs/mutants-toml.html
+
+# Exclude Tier 2/3 BPF probe functions from mutation testing.
+#
+# These functions exist in two versions via cfg(feature = "bpf"):
+# - The real implementations use libbpf-rs syscalls (compiled only with --features bpf)
+# - The stubs return hardcoded fallback values (compiled in default build)
+#
+# Problem: cargo-mutants runs against the default build. The bpf-gated versions
+# are compiled out by cfg, so body-replacement mutations are invisible to tests
+# (false MISSED). Excluding by function name also removes the stub mutations,
+# but those are trivial one-liners already covered by integration tests.
+#
+# Re-evaluate when adding --features bpf to the mutation testing job.
+exclude_re = [
+    "probe_ringbuf",
+    "probe_bpf_loop",
+    "probe_tp_btf",
+    "probe_fentry",
+]
