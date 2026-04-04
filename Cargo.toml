@@ -7,8 +7,8 @@ edition = "2024"
 bpf = ["libbpf-rs", "libbpf-sys", "libc"]
 
 [dependencies]
-libbpf-rs = { version = "0.24", optional = true }
-libbpf-sys = { version = "1.5", optional = true }
+libbpf-rs = { version = "0.26", optional = true }
+libbpf-sys = { version = "1.7", optional = true }
 libc = { version = "0.2", optional = true }
 petgraph = "0.8"
 serde = { version = "1", features = ["derive"] }
