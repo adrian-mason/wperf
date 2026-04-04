@@ -56,7 +56,7 @@ Using the libbpf ecosystem standard **probe → reconfigure → load** pattern, 
 |---------|-------------|-------------|
 | **ringbuf** | `bpf_map_create(BPF_MAP_TYPE_RINGBUF)` | Reconfigure events map to `PERF_EVENT_ARRAY` (set key/value size) |
 | **tp_btf** | `probe_tp_btf("sched_switch")` | Fall back to `raw_tp/sched_switch`; disable `tp_btf` programs via `set_autoload(false)` |
-| **BTF (vmlinux)** | Check `/sys/kernel/btf/vmlinux` | **Phase 1: refuse to run (`EOPNOTSUPP`).** Minimum supported: RHEL/Rocky 8.2+ (`CONFIG_DEBUG_INFO_BTF=y`). Embedded BTF fallback (`min_core_btfs`) deferred to future evaluation. |
+| **BTF (vmlinux)** | Check `/sys/kernel/btf/vmlinux` | **Phase 1: refuse to run (`EOPNOTSUPP`).** Minimum supported: RHEL 8.2+ / Rocky 8.4+ (`CONFIG_DEBUG_INFO_BTF=y`). Embedded BTF fallback (`min_core_btfs`) deferred to future evaluation. |
 | **bpf_loop** | `libbpf_probe_bpf_helper(TRACEPOINT, BPF_FUNC_loop)` | `#pragma unroll` bounded loops |
 | **cgroupv2** | Check `/sys/fs/cgroup/cgroup.controllers` | Disable cgroup filtering; `--cgroup` flag errors out |
 | **tracepoint** | Check `/sys/kernel/tracing/events/{cat}/{name}` | `bpf_program__set_autoload(prog, false)` |
@@ -86,7 +86,7 @@ This is resolved by the CO-RE compiler at load time with zero runtime overhead.
 
 > Decision rationale: [ADR-003: Minimum Kernel Version](../decisions/ADR-003.md)
 
-- **Phase 1 minimum supported (2026-04-04 decision):** Rocky Linux 8.9 / RHEL 8.2+ (kernel 4.18.0-193+, `CONFIG_DEBUG_INFO_BTF=y`). BTF is a hard requirement; no-BTF kernels receive `EOPNOTSUPP`.
+- **Phase 1 minimum supported (2026-04-04 decision):** RHEL 8.2+ / Rocky 8.4+ (kernel 4.18.0-193+, `CONFIG_DEBUG_INFO_BTF=y`). BTF is a hard requirement; no-BTF kernels receive `EOPNOTSUPP`. CI target: Rocky 8.9 (kernel 4.18.0-513+).
 - **Recommended baseline:** Linux 5.4+ (RHEL 8.4+ / Ubuntu 20.04 LTS) for full feature set including ringbuf, `bpf_probe_read_kernel()`, and 1M instruction limit.
 - **Not supported:** RHEL 8.0–8.1 (no BTF, EOL since May 2024). Embedded BTF fallback deferred to future evaluation.
 - Note: ADR-003's original "5.4 recommended, 4.18 best-effort" framing has been narrowed by the Phase 1 BTF-required decision.
@@ -503,7 +503,7 @@ Key mutation targets: deletion of `path.insert`, modification of duration calcul
 
 **Tool:** virtme-ng (second-scale cross-kernel boot)
 - Extract vmlinuz + `/lib/modules/` from distro RPM/deb packages
-- Test kernels: 4.18.0-513+ (Rocky 8.9, Phase 1 minimum) / 5.4 (Ubuntu 20.04 LTS) / 5.8 / 5.17 / 6.x (representing key BPF capability boundaries)
+- Test kernels: 4.18.0-193+ (RHEL 8.2 baseline) / 4.18.0-513+ (Rocky 8.9 CI target) / 5.4 (Ubuntu 20.04 LTS) / 5.8 / 5.17 / 6.x (representing key BPF capability boundaries)
 - Each kernel version validates the feature probe → degradation → load path
 - Testing on 4.18 is strictly required to validate the feature degradation paths (perfarray fallback, `#pragma unroll` fallback, `raw_tp` fallback). Without it, the entire degradation architecture designed in ADR-002, ADR-004, and ADR-013 is unexercised dead code
 
@@ -615,7 +615,7 @@ The full 7-step pipeline + 6 probe types + wPRF format + Dagre+ECharts UI is amb
 
 Supporting kernel 4.18 (RHEL 8.0) doubles engineering complexity due to the 4,096 BPF instruction limit, lack of `bpf_probe_read_kernel()`, and absent BTF/CO-RE. Per [ADR-002-supplement](../decisions/ADR-002-supplement.md), native 4.18 kernels (RHEL 8.0-8.1) lack BTF entirely.
 
-**Phase 1 decision (2026-04-04):** BTF is a hard requirement. Minimum supported kernel: Rocky Linux 8.9 / RHEL 8.2+ (kernel 4.18.0-193+, `CONFIG_DEBUG_INFO_BTF=y`). Kernels without BTF receive `EOPNOTSUPP` at startup. Embedded BTF fallback (`min_core_btfs`) deferred to future evaluation if demand arises for pre-8.2 support. Explicit degradation matrix documents what works on each kernel.
+**Phase 1 decision (2026-04-04):** BTF is a hard requirement. Minimum supported kernel: RHEL 8.2+ / Rocky 8.4+ (kernel 4.18.0-193+, `CONFIG_DEBUG_INFO_BTF=y`). Kernels without BTF receive `EOPNOTSUPP` at startup. Embedded BTF fallback (`min_core_btfs`) deferred to future evaluation if demand arises for pre-8.2 support. Explicit degradation matrix documents what works on each kernel.
 
 ### 8.4 Risk 4: AI-Generated Spec Blind Spots — MEDIUM
 
@@ -670,7 +670,7 @@ The prior design spec claimed "zero P0/P1 residual items." This was a design com
 |-----|----------|--------------|
 | [ADR-001](../decisions/ADR-001.md) | Architecture model | Offline CLI (record/report) |
 | [ADR-002](../decisions/ADR-002.md) | Kernel compatibility | Dynamic per-feature probing |
-| [ADR-003](../decisions/ADR-003.md) | Minimum kernel version | Phase 1: Rocky 8.9 / RHEL 8.2+ (BTF required); see §1.4 |
+| [ADR-003](../decisions/ADR-003.md) | Minimum kernel version | Phase 1: RHEL 8.2+ / Rocky 8.4+ (BTF required); see §1.4 |
 | [ADR-004](../decisions/ADR-004.md) | Event transport | Single-ELF CO-RE dual-mode |
 | [ADR-005](../decisions/ADR-005.md) | Stack unwinding | bpf_get_stackid + Elastic Stack Delta |
 | [ADR-006](../decisions/ADR-006.md) | Graph visualization | Dagre layout + ECharts rendering |
