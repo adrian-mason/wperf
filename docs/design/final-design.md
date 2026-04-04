@@ -167,12 +167,16 @@ When either path fails (fast path returns a suspiciously shallow stack ≤2 fram
 
 ### 2.4 BPF Event Structure
 
-Fixed-length 23-byte BaseEvent wrapped in a 5-byte TLV (Type-Length-Value) header:
+Fixed-length 40-byte `wperf_event` wrapped in a 5-byte TLV (Type-Length-Value) header:
 
 ```
-RecordHeader (5B): rec_type(u8) + length(u32)
-BaseEvent   (23B): event_id(1) + cpu(2) + pid(4) + tid(4) + timestamp_ns(8) + flags(4)
+RecordHeader  (5B):  rec_type(u8) + length(u32)
+wperf_event  (40B):  timestamp_ns(8) + pid(4) + tid(4) + prev_tid(4) + next_tid(4)
+                      + prev_pid(4) + next_pid(4) + cpu(2) + event_type(1)
+                      + prev_state(1) + flags(4)
 ```
+
+The struct uses natural alignment (`#[repr(C)]` / no `__attribute__((packed))`) to avoid per-byte load instructions that trigger BPF verifier rejection on kernels < 5.8. The `flags` field (Phase 1: 0) occupies what would otherwise be tail padding for u64 alignment, reserving space for Phase 2+ extensibility (voluntary/preempted, cross-cgroup wakeup, event source tier).
 
 Variable-length PayloadChunk: `tid(4) + data(N)`, optional Zstd compression. Maximum 16MB per chunk (DoS protection).
 
@@ -332,7 +336,7 @@ The `version` field and TLV record format enable forward compatibility — reade
 
 Each event is wrapped in a `RecordHeader` (5B): `rec_type(u8) + length(u32)`.
 
-- **BaseEvent** (fixed 23B): event_id + cpu + pid + tid + timestamp_ns + flags
+- **wperf_event** (fixed 40B): timestamp_ns + pid + tid + prev_tid + next_tid + prev_pid + next_pid + cpu + event_type + prev_state + flags (see §2.4)
 - **PayloadChunk** (variable): tid + data, optional Zstd compression. Max 16MB (DoS protection).
 
 ### 4.3 Footer Section Table

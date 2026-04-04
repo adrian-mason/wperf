@@ -109,7 +109,7 @@ Offset  Size  Field        Description
 26      8     perfts       Performance clock timestamp
 ```
 
-**Comparison with wPerf BaseEvent (23B):** wPerf uses a common header + TLV payload. The original packs everything into a flat struct with dual timestamps (TSC + perfclock). wPerf drops TSC in favor of `bpf_ktime_get_ns()` only.
+**Comparison with wPerf `wperf_event` (40B):** wPerf uses a common TLV-wrapped event struct. The original packs everything into a flat struct with dual timestamps (TSC + perfclock). wPerf drops TSC in favor of `bpf_ktime_get_ns()` only and uses a naturally-aligned 40-byte struct for BPF verifier compatibility.
 
 ### 4.2 softirq_result — 19 bytes
 
@@ -272,7 +272,7 @@ All core probes (sched_switch, sched_wakeup, sched_process_fork, sched_process_e
 |----------|-------|-------------|
 | JProbes (removed in kernel 4.15) | tp_btf + raw_tp | Stable ABI, works on 4.17+ |
 | 500MB vmalloc per buffer | ringbuf (shared) + perfarray fallback | Kernel-managed memory, backpressure |
-| 34-byte flat packed struct | TLV with 23B BaseEvent + payload | Forward-compatible, extensible |
+| 34-byte flat packed struct | TLV with 40B `wperf_event` + payload | Forward-compatible, extensible |
 | Polling every 1 second | Event-driven `ring_buffer__poll` | Lower latency, no busy-wait |
 | PID whitelist (500 max) | cgroupv2 filtering | Scalable, container-native |
 | No crash recovery | `data_section_end_offset` in header | Recoverable on SIGKILL |
