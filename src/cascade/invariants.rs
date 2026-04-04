@@ -2,7 +2,7 @@
 //!
 //! The production sentinel check (I-2 ∧ I-7) runs in all builds. It is
 //! implemented by `verify_engine_postconditions` (returns `Result`) and `invariants_ok` (returns `bool`).
-//! I-3, I-4 are debug_assert only. I-5, I-6 are test-only.
+//! I-3, I-4 are `debug_assert` only. I-5, I-6 are test-only.
 
 use std::fmt;
 
@@ -30,7 +30,7 @@ impl std::error::Error for InvariantError {}
 /// Production sentinel: I-2 (non-amplification) ∧ I-7 (locality).
 ///
 /// Structural postcondition guard per ADR-016. Checks that no edge's
-/// attributed_delay_ms exceeds its raw_wait_ms (I-2) and that graph
+/// `attributed_delay_ms` exceeds its `raw_wait_ms` (I-2) and that graph
 /// topology is preserved (I-7). Catches 0/5 known bugs by construction;
 /// its value is defense-in-depth against future regressions.
 pub fn invariants_ok(original: &WaitForGraph, result: &WaitForGraph) -> bool {
@@ -56,7 +56,7 @@ pub fn verify_engine_postconditions(
 }
 
 /// I-2: Non-amplification.
-/// No edge's attributed_delay_ms may exceed its raw_wait_ms.
+/// No edge's `attributed_delay_ms` may exceed its `raw_wait_ms`.
 pub fn check_non_amplification(result: &WaitForGraph) -> bool {
     result
         .all_edges()
@@ -65,7 +65,7 @@ pub fn check_non_amplification(result: &WaitForGraph) -> bool {
 }
 
 /// I-3: Non-negativity.
-/// All attributed_delay_ms >= 0. Trivially true for u64, but documents intent.
+/// All `attributed_delay_ms` >= 0. Trivially true for u64, but documents intent.
 pub fn check_non_negativity(_result: &WaitForGraph) -> bool {
     true // u64 is always >= 0
 }
@@ -79,7 +79,7 @@ pub fn check_termination(original: &WaitForGraph, result: &WaitForGraph) -> bool
 
 /// I-7: Locality.
 /// Every edge in result must correspond to an edge in original with
-/// the same (src, dst) and time_window.
+/// the same (src, dst) and `time_window`.
 pub fn check_locality(original: &WaitForGraph, result: &WaitForGraph) -> bool {
     let orig_edges = original.all_edges();
     let res_edges = result.all_edges();
@@ -131,12 +131,12 @@ pub fn check_idempotency(graph: &WaitForGraph, max_depth: u32) -> bool {
 /// I-6: Depth monotonicity (simple chains only).
 ///
 /// For simple chains (no fan-out, no concurrent waiters): increasing
-/// max_depth propagates more weight downstream, so
+/// `max_depth` propagates more weight downstream, so
 /// `total_attributed(deep) ≤ total_attributed(shallow)`.
 ///
-/// Does NOT hold in general because the corrected child_absorbed
+/// Does NOT hold in general because the corrected `child_absorbed`
 /// computation (`prop_down + child_blame`) can be less than
-/// `window.duration()` when fan-out (target_count > 1) or concurrent
+/// `window.duration()` when fan-out (`target_count` > 1) or concurrent
 /// waiters divide the transfer amount. This means deeper recursion
 /// may propagate less weight downstream than the depth-truncation
 /// base case, which returns full `(0, window.duration())`.

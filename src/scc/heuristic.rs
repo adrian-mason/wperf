@@ -1,7 +1,7 @@
 //! MAX heuristic for super-node weights (step 6, §3.5).
 //!
-//! Super-node weight = MAX(attributed_delay of all internal edges).
-//! For singleton SCCs, weight = max attributed_delay of incident edges.
+//! Super-node weight = `MAX(attributed_delay` of all internal edges).
+//! For singleton SCCs, weight = max `attributed_delay` of incident edges.
 //! This is explicitly a sorting heuristic, not mathematical truth
 //! (ADR-008).
 
@@ -10,9 +10,9 @@ use crate::graph::wfg::WaitForGraph;
 use super::tarjan::{CondensationDag, Scc, internal_edges};
 
 /// Compute MAX heuristic weight for an SCC.
-/// Returns the maximum attributed_delay_ms among all internal edges.
+/// Returns the maximum `attributed_delay_ms` among all internal edges.
 /// For singleton SCCs with no internal edges, returns the max
-/// attributed_delay of any edge touching the member.
+/// `attributed_delay` of any edge touching the member.
 pub fn max_heuristic_weight(graph: &WaitForGraph, scc: &Scc) -> u64 {
     let int_edges = internal_edges(graph, scc);
 

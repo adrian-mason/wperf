@@ -2,11 +2,11 @@
 //!
 //! Implements Step 4 of the algorithm pipeline (§3.4).
 //! Pure function: takes immutable graph, returns new graph with
-//! attributed_delay_ms computed.
+//! `attributed_delay_ms` computed.
 //!
 //! Each edge is processed independently:
-//!   attributed_delay = raw_wait - propagated_downstream
-//! This means attributed_delay represents the DIRECT fault of the
+//!   `attributed_delay` = `raw_wait` - `propagated_downstream`
+//! This means `attributed_delay` represents the DIRECT fault of the
 //! destination node, excluding what deeper nodes are responsible for.
 
 use std::collections::BTreeMap;
@@ -15,7 +15,7 @@ use std::collections::BTreeSet;
 use petgraph::graph::EdgeIndex;
 
 use crate::graph::sweep::sweep_line_partition;
-use crate::graph::types::*;
+use crate::graph::types::{ThreadId, TimeWindow};
 use crate::graph::wfg::WaitForGraph;
 
 use super::invariants;
@@ -138,9 +138,8 @@ fn compute_cascade(
 }
 
 fn count_concurrent_waiters(graph: &WaitForGraph, target: ThreadId, window: &TimeWindow) -> u64 {
-    let node_idx = match graph.node_index(&target) {
-        Some(idx) => idx,
-        None => return 1,
+    let Some(node_idx) = graph.node_index(&target) else {
+        return 1;
     };
 
     let count = graph
