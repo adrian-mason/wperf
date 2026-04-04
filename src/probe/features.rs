@@ -541,7 +541,7 @@ mod tests {
         assert!(matches!(err, ProbeError::BtfRequired));
     }
 
-    // -- Display --
+    // -- Error trait --
 
     #[test]
     fn error_display() {
@@ -549,5 +549,78 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("BTF not available"));
         assert!(msg.contains("RHEL 8.2+"));
+    }
+
+    #[test]
+    fn error_display_io() {
+        let io_err = io::Error::new(io::ErrorKind::PermissionDenied, "no access");
+        let err = ProbeError::Io(io_err);
+        let msg = err.to_string();
+        assert!(msg.contains("I/O error"));
+    }
+
+    #[test]
+    fn error_display_syscall() {
+        let err = ProbeError::Syscall("test failure".to_string());
+        let msg = err.to_string();
+        assert!(msg.contains("syscall probe failed"));
+    }
+
+    #[test]
+    fn error_source_io_returns_some() {
+        let io_err = io::Error::new(io::ErrorKind::PermissionDenied, "no access");
+        let err = ProbeError::Io(io_err);
+        assert!(std::error::Error::source(&err).is_some());
+    }
+
+    #[test]
+    fn error_source_btf_required_returns_none() {
+        let err = ProbeError::BtfRequired;
+        assert!(std::error::Error::source(&err).is_none());
+    }
+
+    // -- file_contains_line edge cases --
+
+    #[test]
+    fn file_contains_line_permission_denied_propagates() {
+        // Create a directory where a file name exists but can't be read.
+        // On most systems, trying to open a directory as a file gives an error
+        // that is NOT NotFound — it should propagate, not return Ok(false).
+        let dir = TempDir::new("perm_denied");
+        let target = dir.path().join("unreadable");
+        fs::create_dir_all(&target).unwrap();
+        // Opening a directory as a regular file returns an error on Linux.
+        let result = file_contains_line(&target, "anything");
+        // The error should propagate (not silently return false).
+        assert!(result.is_err());
+    }
+
+    // -- Stub return value discrimination --
+
+    #[test]
+    fn ringbuf_stub_not_ringbuf() {
+        // Ensure the stub specifically returns PerfArray, not RingBuf.
+        let result = probe_ringbuf().unwrap();
+        assert_ne!(result, TransportMode::RingBuf);
+    }
+
+    #[test]
+    fn bpf_loop_stub_specifically_false() {
+        // Ensure the stub returns exactly false, not true.
+        let result = probe_bpf_loop().unwrap();
+        assert!(!result);
+    }
+
+    // -- probe_all cgroupv2 false path --
+
+    #[test]
+    fn probe_all_without_cgroupv2() {
+        let dir = TempDir::new("probe_all_nocgroup");
+        fs::write(dir.path().join("btf_vmlinux"), b"").unwrap();
+        // No cgroup_controllers file
+        let paths = test_paths(dir.path());
+
+        let matrix = probe_all(&paths).unwrap();
+        assert!(!matrix.has_cgroupv2);
     }
 }
