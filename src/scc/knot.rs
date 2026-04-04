@@ -53,10 +53,13 @@ pub fn detect_knots(cdag: &CondensationDag, graph: &WaitForGraph) -> Vec<Knot> {
 
 /// Check if a thread has a self-loop in the WFG.
 fn has_self_loop(graph: &WaitForGraph, tid: ThreadId) -> bool {
+    let Some(idx) = graph.node_index(&tid) else {
+        return false;
+    };
     graph
-        .all_edges()
+        .outgoing_edges(idx)
         .iter()
-        .any(|(_, src, dst, _)| *src == tid && *dst == tid)
+        .any(|(_, dst, _)| *dst == tid)
 }
 
 /// Check if ALL members of an SCC are kernel threads.
