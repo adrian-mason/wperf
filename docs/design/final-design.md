@@ -56,7 +56,7 @@ Using the libbpf ecosystem standard **probe → reconfigure → load** pattern, 
 |---------|-------------|-------------|
 | **ringbuf** | `bpf_map_create(BPF_MAP_TYPE_RINGBUF)` | Reconfigure events map to `PERF_EVENT_ARRAY` (set key/value size) |
 | **tp_btf** | `probe_tp_btf("sched_switch")` | Fall back to `raw_tp/sched_switch`; disable `tp_btf` programs via `set_autoload(false)` |
-| **BTF (vmlinux)** | Check `/sys/kernel/btf/vmlinux` | Embedded BTF fallback; if still fails, refuse to run (`EOPNOTSUPP`) |
+| **BTF (vmlinux)** | Check `/sys/kernel/btf/vmlinux` | **Phase 1: refuse to run (`EOPNOTSUPP`).** Minimum supported: RHEL 8.2+ / Rocky 8.4+ (`CONFIG_DEBUG_INFO_BTF=y`). Embedded BTF fallback (`min_core_btfs`) deferred to future evaluation. |
 | **bpf_loop** | `libbpf_probe_bpf_helper(TRACEPOINT, BPF_FUNC_loop)` | `#pragma unroll` bounded loops |
 | **cgroupv2** | Check `/sys/fs/cgroup/cgroup.controllers` | Disable cgroup filtering; `--cgroup` flag errors out |
 | **tracepoint** | Check `/sys/kernel/tracing/events/{cat}/{name}` | `bpf_program__set_autoload(prog, false)` |
@@ -86,9 +86,10 @@ This is resolved by the CO-RE compiler at load time with zero runtime overhead.
 
 > Decision rationale: [ADR-003: Minimum Kernel Version](../decisions/ADR-003.md)
 
-- **Recommended minimum:** Linux 5.4 (RHEL 8.4+ / Ubuntu 20.04 LTS)
-- **Best-effort support:** Linux 4.18 (RHEL 8.0+) via feature probing degradation
-- 4.18's 4,096 BPF instruction limit doubles engineering complexity; RHEL 8.0–8.1 reached end of support in May 2024
+- **Phase 1 minimum supported (2026-04-04 decision):** RHEL 8.2+ / Rocky 8.4+ (kernel 4.18.0-193+, `CONFIG_DEBUG_INFO_BTF=y`). BTF is a hard requirement; no-BTF kernels receive `EOPNOTSUPP`. CI target: Rocky 8.9 (kernel 4.18.0-513+).
+- **Recommended baseline:** Linux 5.4+ (RHEL 8.4+ / Ubuntu 20.04 LTS) for full feature set including ringbuf, `bpf_probe_read_kernel()`, and 1M instruction limit.
+- **Not supported:** RHEL 8.0–8.1 (no BTF, EOL since May 2024). Embedded BTF fallback deferred to future evaluation.
+- Note: ADR-003's original "5.4 recommended, 4.18 best-effort" framing has been narrowed by the Phase 1 BTF-required decision.
 
 ### 1.5 Glossary
 
@@ -127,6 +128,12 @@ Scheduler probes use `tp_btf` (BTF-enabled tracing, 5.5+) with `raw_tp` fallback
 | — | `tp/irq/softirq_entry` + `softirq_exit` | — | **Auxiliary** (softirq attribution) |
 
 Non-scheduler probes (futex, block I/O, softirq) retain standard `tp/` — their trace event format structs provide all needed fields without `task_struct` traversal. Extensions beyond the paper are gated by `const volatile bool` feature flags, allowing selective enable/disable at load time.
+
+**Field access strategy (Phase 1 decision, 2026-04-04):**
+- **tp_btf programs** (BTF-enabled): use direct pointer dereference (`prev->pid`, `next->tgid`) — compiles to single load instructions, maximum performance on high-version kernels.
+- **raw_tp programs** (fallback): use `BPF_CORE_READ(prev, pid)` — compiles to `bpf_probe_read_kernel()` helper calls, correct on all BTF-enabled kernels.
+- **Implementation pattern**: Two independent handler sets generated via macro (`DEFINE_HANDLER(name, READ_FIELD)` with `DIRECT_READ` / `BPF_CORE_READ`), not shared handlers. This avoids the trade-off where shared helpers force `BPF_CORE_READ` on the tp_btf hot path. Reference: `bcc/libbpf-tools/runqlat.bpf.c`, `runqslower.bpf.c`.
+- **Userspace selection**: `probe_tp_btf("sched_switch")` at startup; disable unused variant via `bpf_program__set_autoload(prog, false)`. Both variants compiled into the same `.bpf.o`.
 
 ### 2.2 Transport — Single-ELF CO-RE Dual-Mode
 
@@ -330,6 +337,14 @@ pub struct WprfHeader {
 }
 ```
 
+**Feature Bitmap Bit Assignments (Phase 1):**
+
+| Byte | Bit | Name | Meaning |
+|------|-----|------|---------|
+| 0 | 0 | `HAS_TIMESTAMPS` | Events contain valid `timestamp_ns` fields |
+| 0 | 1-7 | — | Reserved, must be 0 |
+| 1-31 | — | — | Reserved, must be 0 |
+
 The `version` field and TLV record format enable forward compatibility — readers can skip unknown record types without failing.
 
 ### 4.2 TLV Event Stream
@@ -347,7 +362,7 @@ Stream-friendly design — written at the end of the file:
 |-----------|---------|
 | 1 | String Table (thread names, cgroup names) |
 | 2 | Symbol Resolution Table |
-| 3 | Metadata (Build-ID, HOSTNAME, OSRELEASE, CLI_ARGS, DROP_COUNT) |
+| 3 | Metadata — phased delivery: **Phase 1 W1** (format writer): `EVENT_COUNT`, `DROP_COUNT`; **Phase 1 W2+** (record CLI): `BUILD_ID`, `HOSTNAME`, `OSRELEASE`, `CLI_ARGS`. Binary key-value format; reader skips unknown keys. |
 | 4 | Attr Section (Collection config, sampling rates — P2 deferred) |
 
 ### 4.4 Crash Tolerance
@@ -488,7 +503,7 @@ Key mutation targets: deletion of `path.insert`, modification of duration calcul
 
 **Tool:** virtme-ng (second-scale cross-kernel boot)
 - Extract vmlinuz + `/lib/modules/` from distro RPM/deb packages
-- Test kernels: 4.18 (best-effort baseline) / 5.4 (recommended minimum) / 5.8 / 5.17 / 6.x (representing key BPF capability boundaries)
+- Test kernels: 4.18.0-193+ (RHEL 8.2 baseline) / 4.18.0-513+ (Rocky 8.9 CI target) / 5.4 (Ubuntu 20.04 LTS) / 5.8 / 5.17 / 6.x (representing key BPF capability boundaries)
 - Each kernel version validates the feature probe → degradation → load path
 - Testing on 4.18 is strictly required to validate the feature degradation paths (perfarray fallback, `#pragma unroll` fallback, `raw_tp` fallback). Without it, the entire degradation architecture designed in ADR-002, ADR-004, and ADR-013 is unexercised dead code
 
@@ -598,9 +613,9 @@ The full 7-step pipeline + 6 probe types + wPRF format + Dagre+ECharts UI is amb
 
 ### 8.3 Risk 3: Minimum Kernel Version — MEDIUM
 
-Supporting kernel 4.18 (RHEL 8.0) doubles engineering complexity due to the 4,096 BPF instruction limit, lack of `bpf_probe_read_kernel()`, and absent BTF/CO-RE. Per [ADR-002-supplement](../decisions/ADR-002-supplement.md), native 4.18 kernels (RHEL 8.0-8.1) lack BTF entirely — without implementing the embedded BTF (`min_core_btfs`) pattern, the tool will refuse to run (`EOPNOTSUPP`) on these kernels despite other feature degradations being available.
+Supporting kernel 4.18 (RHEL 8.0) doubles engineering complexity due to the 4,096 BPF instruction limit, lack of `bpf_probe_read_kernel()`, and absent BTF/CO-RE. Per [ADR-002-supplement](../decisions/ADR-002-supplement.md), native 4.18 kernels (RHEL 8.0-8.1) lack BTF entirely.
 
-**Mitigation:** 5.4 recommended minimum (BTF available in all major distributions); 4.18 best-effort requires a Phase 1 scope decision on whether to ship embedded BTF or accept BTF as a hard requirement; explicit degradation matrix documents what works on each kernel.
+**Phase 1 decision (2026-04-04):** BTF is a hard requirement. Minimum supported kernel: RHEL 8.2+ / Rocky 8.4+ (kernel 4.18.0-193+, `CONFIG_DEBUG_INFO_BTF=y`). Kernels without BTF receive `EOPNOTSUPP` at startup. Embedded BTF fallback (`min_core_btfs`) deferred to future evaluation if demand arises for pre-8.2 support. Explicit degradation matrix documents what works on each kernel.
 
 ### 8.4 Risk 4: AI-Generated Spec Blind Spots — MEDIUM
 
@@ -655,7 +670,7 @@ The prior design spec claimed "zero P0/P1 residual items." This was a design com
 |-----|----------|--------------|
 | [ADR-001](../decisions/ADR-001.md) | Architecture model | Offline CLI (record/report) |
 | [ADR-002](../decisions/ADR-002.md) | Kernel compatibility | Dynamic per-feature probing |
-| [ADR-003](../decisions/ADR-003.md) | Minimum kernel version | 5.4 recommended, 4.18 best-effort |
+| [ADR-003](../decisions/ADR-003.md) | Minimum kernel version | Phase 1: RHEL 8.2+ / Rocky 8.4+ (BTF required); see §1.4 |
 | [ADR-004](../decisions/ADR-004.md) | Event transport | Single-ELF CO-RE dual-mode |
 | [ADR-005](../decisions/ADR-005.md) | Stack unwinding | bpf_get_stackid + Elastic Stack Delta |
 | [ADR-006](../decisions/ADR-006.md) | Graph visualization | Dagre layout + ECharts rendering |
