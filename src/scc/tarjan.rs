@@ -1,7 +1,7 @@
 //! Tarjan SCC identification and condensation DAG construction.
 //!
 //! Step 5 of the 7-step pipeline (§3.5).
-//! petgraph::algo::tarjan_scc returns components in reverse topological
+//! `petgraph::algo::tarjan_scc` returns components in reverse topological
 //! order (sink SCCs first).
 
 use std::collections::BTreeMap;
@@ -11,7 +11,7 @@ use petgraph::algo::tarjan_scc;
 use petgraph::graph::{DiGraph, NodeIndex};
 use serde::Serialize;
 
-use crate::graph::types::*;
+use crate::graph::types::{EdgeWeight, ThreadId};
 use crate::graph::wfg::WaitForGraph;
 
 /// A strongly connected component.
@@ -29,7 +29,7 @@ pub struct SuperNode {
 }
 
 /// The condensation DAG — acyclic graph of super-nodes.
-/// Edges carry the max attributed_delay among parallel cross-SCC edges.
+/// Edges carry the max `attributed_delay` among parallel cross-SCC edges.
 pub struct CondensationDag {
     pub dag: DiGraph<SuperNode, u64>,
     pub(crate) node_map: BTreeMap<ThreadId, NodeIndex>,
@@ -73,7 +73,7 @@ impl CondensationDag {
         self.dag.edges_directed(idx, Direction::Outgoing).count()
     }
 
-    /// Sink super-nodes (out_degree == 0).
+    /// Sink super-nodes (`out_degree` == 0).
     pub fn sinks(&self) -> Vec<NodeIndex> {
         self.dag
             .node_indices()
@@ -101,7 +101,7 @@ pub fn find_sccs(graph: &WaitForGraph) -> Vec<Scc> {
 /// Build an acyclic condensation DAG from the Wait-For Graph.
 ///
 /// Each SCC becomes a super-node (weight=0, filled by heuristic).
-/// Cross-SCC edges become DAG edges with weight = max attributed_delay
+/// Cross-SCC edges become DAG edges with weight = max `attributed_delay`
 /// among all parallel edges between the same pair of SCCs.
 pub fn build_condensation(graph: &WaitForGraph) -> CondensationDag {
     let sccs = find_sccs(graph);
@@ -162,6 +162,7 @@ pub fn internal_edges<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::types::{NodeKind, TimeWindow};
 
     #[test]
     fn acyclic_graph_all_singleton_sccs() {

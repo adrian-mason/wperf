@@ -1,6 +1,6 @@
-//! Wait-For Graph — wraps petgraph::DiGraph with ThreadId-based lookup.
+//! Wait-For Graph — wraps `petgraph::DiGraph` with ThreadId-based lookup.
 //!
-//! Uses BTreeMap for deterministic iteration order (ADR-007).
+//! Uses `BTreeMap` for deterministic iteration order (ADR-007).
 
 use std::collections::BTreeMap;
 
@@ -8,7 +8,7 @@ use petgraph::Direction;
 use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
 
-use super::types::*;
+use super::types::{EdgeWeight, NodeKind, NodeWeight, ThreadId, TimeWindow};
 
 /// The Wait-For Graph. Directed graph where:
 /// - Nodes = threads (or pseudo-threads)
@@ -27,7 +27,7 @@ impl WaitForGraph {
         }
     }
 
-    /// Add a node (thread). Returns the NodeIndex. Idempotent — returns
+    /// Add a node (thread). Returns the `NodeIndex`. Idempotent — returns
     /// existing index if tid already present.
     pub fn add_node(&mut self, tid: ThreadId, kind: NodeKind) -> NodeIndex {
         if let Some(&idx) = self.node_map.get(&tid) {
@@ -46,17 +46,17 @@ impl WaitForGraph {
             .add_edge(src_idx, dst_idx, EdgeWeight::new(window))
     }
 
-    /// Get the ThreadId for a NodeIndex.
+    /// Get the `ThreadId` for a `NodeIndex`.
     pub fn thread_id(&self, idx: NodeIndex) -> ThreadId {
         self.graph[idx].tid
     }
 
-    /// Get NodeIndex for a ThreadId.
+    /// Get `NodeIndex` for a `ThreadId`.
     pub fn node_index(&self, tid: &ThreadId) -> Option<NodeIndex> {
         self.node_map.get(tid).copied()
     }
 
-    /// Get all outgoing edges from `node` as (EdgeIndex, dst_ThreadId, &EdgeWeight).
+    /// Get all outgoing edges from `node` as (`EdgeIndex`, `dst_ThreadId`, &`EdgeWeight`).
     pub fn outgoing_edges(&self, node: NodeIndex) -> Vec<(EdgeIndex, ThreadId, &EdgeWeight)> {
         self.graph
             .edges_directed(node, Direction::Outgoing)
@@ -72,7 +72,7 @@ impl WaitForGraph {
             .collect()
     }
 
-    /// Iterate all edges as (EdgeIndex, src_tid, dst_tid, &EdgeWeight).
+    /// Iterate all edges as (`EdgeIndex`, `src_tid`, `dst_tid`, &`EdgeWeight`).
     /// BTreeMap-ordered by source tid for determinism.
     pub fn all_edges(&self) -> Vec<(EdgeIndex, ThreadId, ThreadId, &EdgeWeight)> {
         let mut result: Vec<_> = self
@@ -118,18 +118,18 @@ impl WaitForGraph {
         &self.graph[idx]
     }
 
-    /// All node indices, sorted by ThreadId for determinism.
+    /// All node indices, sorted by `ThreadId` for determinism.
     pub fn node_indices(&self) -> Vec<NodeIndex> {
         self.node_map.values().copied().collect()
     }
 
     /// Clone the graph structure with the same topology but reset
-    /// attributed_delay_ms to raw_wait_ms on all edges.
+    /// `attributed_delay_ms` to `raw_wait_ms` on all edges.
     pub fn clone_with_reset_attribution(&self) -> Self {
         let mut new = Self::new();
         // Clone nodes
-        for (&tid, &_idx) in &self.node_map {
-            new.add_node(tid, self.graph[_idx].kind);
+        for (&tid, &idx) in &self.node_map {
+            new.add_node(tid, self.graph[idx].kind);
         }
         // Clone edges
         for eidx in self.graph.edge_indices() {
@@ -142,7 +142,7 @@ impl WaitForGraph {
         new
     }
 
-    /// Sum of all raw_wait_ms across all edges.
+    /// Sum of all `raw_wait_ms` across all edges.
     pub fn total_raw_wait(&self) -> u64 {
         self.graph
             .edge_indices()
@@ -155,7 +155,7 @@ impl WaitForGraph {
         petgraph::algo::toposort(&self.graph, None).is_ok()
     }
 
-    /// Sum of all attributed_delay_ms across all edges.
+    /// Sum of all `attributed_delay_ms` across all edges.
     pub fn total_attributed(&self) -> u64 {
         self.graph
             .edge_indices()
