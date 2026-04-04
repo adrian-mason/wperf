@@ -193,7 +193,6 @@ fn file_contains_line(path: &Path, needle: &str) -> Result<bool, ProbeError> {
 ///
 /// Requires `CAP_BPF` or `CAP_SYS_ADMIN`.
 #[cfg(feature = "bpf")]
-#[mutants::skip] // cfg-gated out in default build; mutation has no observable effect on tests
 pub fn probe_ringbuf() -> Result<TransportMode, ProbeError> {
     use libbpf_rs::MapType;
 
@@ -222,7 +221,6 @@ pub fn probe_ringbuf() -> Result<TransportMode, ProbeError> {
 /// Uses `libbpf_probe_bpf_helper` to check `BPF_FUNC_loop` availability
 /// for `BPF_PROG_TYPE_TRACEPOINT` programs.
 #[cfg(feature = "bpf")]
-#[mutants::skip] // cfg-gated out in default build; mutation has no observable effect on tests
 pub fn probe_bpf_loop() -> Result<bool, ProbeError> {
     // libbpf_probe_bpf_helper(BPF_PROG_TYPE_TRACEPOINT, BPF_FUNC_loop, NULL)
     // libbpf-rs exposes this via libbpf_sys.
@@ -260,7 +258,6 @@ pub fn probe_bpf_loop() -> Result<bool, ProbeError> {
 ///
 /// Full implementation depends on skeleton infrastructure from task #5.
 #[cfg(feature = "bpf")]
-#[mutants::skip] // cfg-gated out in default build; mutation has no observable effect on tests
 pub fn probe_tp_btf() -> Result<TracepointMode, ProbeError> {
     // TODO(probe): Implement minimal tp_btf attach test once skeleton infra lands.
     // For now, attempt detection via BTF type existence as a proxy:
@@ -281,7 +278,6 @@ pub fn probe_tp_btf() -> Result<TracepointMode, ProbeError> {
 /// Requires loading a minimal BPF program that attaches via fentry.
 /// Full implementation depends on skeleton infrastructure from task #5.
 #[cfg(feature = "bpf")]
-#[mutants::skip] // cfg-gated out in default build; mutation has no observable effect on tests
 pub fn probe_fentry() -> Result<bool, ProbeError> {
     // TODO(probe): Implement minimal fentry attach test once skeleton infra lands.
     Ok(false)
