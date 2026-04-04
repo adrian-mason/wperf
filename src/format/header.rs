@@ -49,7 +49,7 @@ impl WprfHeader {
             version: VERSION,
             endianness: ENDIAN_LE,
             host_arch: detect_arch(),
-            data_section_end_offset: 0,
+            data_section_end_offset: HEADER_SIZE as u64,
             section_table_offset: 0,
             feature_bitmap: [0u8; 32],
         }

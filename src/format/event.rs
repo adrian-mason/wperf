@@ -50,7 +50,7 @@ impl EventType {
 /// `#[repr(C)]` ensures C-compatible layout. Fields are ordered
 /// for natural alignment (u64 first, then u32s, then u16, then u8s, then u32).
 /// The `flags` field occupies what would otherwise be tail padding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(C)]
 pub struct WperfEvent {
     pub timestamp_ns: u64,
@@ -119,18 +119,6 @@ impl WperfEvent {
     /// Typed event accessor.
     pub fn event_type_enum(&self) -> Option<EventType> {
         EventType::from_u8(self.event_type)
-    }
-}
-
-impl PartialOrd for WperfEvent {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for WperfEvent {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.timestamp_ns.cmp(&other.timestamp_ns)
     }
 }
 
