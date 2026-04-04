@@ -22,7 +22,7 @@ const TLV_HEADER_SIZE: usize = 5;
 /// Footer section IDs (per final-design.md §4.3).
 const SECTION_ID_METADATA: u32 = 3;
 
-/// Footer section entry size: section_id(u32) + offset(u64) + size(u64) = 20 bytes.
+/// Footer section entry size: `section_id(u32)` + offset(u64) + size(u64) = 20 bytes.
 const SECTION_ENTRY_SIZE: usize = 20;
 
 /// Writer for .wperf binary files.
@@ -64,6 +64,7 @@ impl<W: Write + Seek> WperfWriter<W> {
 
         // TLV header
         self.inner.write_all(&[REC_TYPE_SCHED_EVENT])?;
+        #[allow(clippy::cast_possible_truncation)] // EVENT_SIZE is 40, always fits u32
         self.inner.write_all(&(EVENT_SIZE as u32).to_le_bytes())?;
 
         // Event payload
@@ -74,7 +75,7 @@ impl<W: Write + Seek> WperfWriter<W> {
         // Periodically update data_section_end_offset for crash recovery.
         // Every 1024 events, flush the current write position into the header
         // so a crash-recovery reader knows how far valid data extends.
-        if self.event_count % 1024 == 0 {
+        if self.event_count.is_multiple_of(1024) {
             self.update_data_offset()?;
         }
 
@@ -132,7 +133,7 @@ impl<W: Write + Seek> WperfWriter<W> {
         self.event_count
     }
 
-    /// Update the data_section_end_offset in the header for crash recovery.
+    /// Update the `data_section_end_offset` in the header for crash recovery.
     fn update_data_offset(&mut self) -> io::Result<()> {
         let current_pos = self.inner.stream_position()?;
         self.header.data_section_end_offset = current_pos;
@@ -151,7 +152,7 @@ impl<W: Write + Seek> WperfWriter<W> {
 /// Build a binary metadata payload.
 ///
 /// Format: sequence of `key_len(u16) + key(bytes) + value_len(u16) + value(bytes)`.
-/// Phase 1 keys: "EVENT_COUNT", "DROP_COUNT".
+/// Phase 1 keys: "`EVENT_COUNT`", "`DROP_COUNT`".
 fn build_metadata(event_count: u64, drop_count: u64) -> Vec<u8> {
     let mut buf = Vec::new();
     write_meta_entry(&mut buf, b"EVENT_COUNT", &event_count.to_le_bytes());
@@ -159,6 +160,7 @@ fn build_metadata(event_count: u64, drop_count: u64) -> Vec<u8> {
     buf
 }
 
+#[allow(clippy::cast_possible_truncation)] // keys/values are short literals, always fit u16
 fn write_meta_entry(buf: &mut Vec<u8>, key: &[u8], value: &[u8]) {
     buf.extend_from_slice(&(key.len() as u16).to_le_bytes());
     buf.extend_from_slice(key);
@@ -167,7 +169,7 @@ fn write_meta_entry(buf: &mut Vec<u8>, key: &[u8], value: &[u8]) {
 }
 
 /// Parse metadata from a footer section payload.
-/// Returns (event_count, drop_count) if found.
+/// Returns (`event_count`, `drop_count`) if found.
 pub fn parse_metadata(data: &[u8]) -> (Option<u64>, Option<u64>) {
     let mut event_count = None;
     let mut drop_count = None;
@@ -200,7 +202,7 @@ pub fn parse_metadata(data: &[u8]) -> (Option<u64>, Option<u64>) {
     (event_count, drop_count)
 }
 
-/// Read a section table entry: returns (section_id, offset, size).
+/// Read a section table entry: returns (`section_id`, offset, size).
 pub fn read_section_entry<R: io::Read>(r: &mut R) -> io::Result<(u32, u64, u64)> {
     let mut buf = [0u8; SECTION_ENTRY_SIZE];
     r.read_exact(&mut buf)?;
@@ -210,7 +212,7 @@ pub fn read_section_entry<R: io::Read>(r: &mut R) -> io::Result<(u32, u64, u64)>
     Ok((id, offset, size))
 }
 
-/// Read a TLV record header: returns (rec_type, payload_length).
+/// Read a TLV record header: returns (`rec_type`, `payload_length`).
 pub fn read_tlv_header<R: io::Read>(r: &mut R) -> io::Result<(u8, u32)> {
     let mut buf = [0u8; TLV_HEADER_SIZE];
     r.read_exact(&mut buf)?;
@@ -219,10 +221,11 @@ pub fn read_tlv_header<R: io::Read>(r: &mut R) -> io::Result<(u8, u32)> {
     Ok((rec_type, length))
 }
 
-/// Maximum allowed TLV payload size (16MB, ADR-010 DoS protection).
+/// Maximum allowed TLV payload size (16MB, ADR-010 `DoS` protection).
 pub const MAX_PAYLOAD_SIZE: u32 = 16 * 1024 * 1024;
 
 #[cfg(test)]
+#[allow(clippy::cast_possible_truncation)]
 mod tests {
     use super::*;
     use crate::format::event::EventType;

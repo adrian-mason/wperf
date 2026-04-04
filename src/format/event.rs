@@ -65,7 +65,7 @@ pub struct WperfEvent {
     pub prev_state: u8,
     /// Reserved flags (0 in Phase 1). Phase 2+ may use for:
     /// bit 0: voluntary vs preempted, bit 1: cross-cgroup wakeup,
-    /// bits 2-3: event source tier (tp_btf/raw_tp/kprobe).
+    /// bits 2-3: event source tier (`tp_btf/raw_tp/kprobe`).
     pub flags: u32,
 }
 
