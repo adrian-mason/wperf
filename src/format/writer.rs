@@ -10,7 +10,7 @@
 
 use std::io::{self, Seek, SeekFrom, Write};
 
-use super::event::{WperfEvent, EVENT_SIZE};
+use super::event::{EVENT_SIZE, WperfEvent};
 use super::header::WprfHeader;
 
 /// TLV record type for scheduling events.
@@ -64,8 +64,7 @@ impl<W: Write + Seek> WperfWriter<W> {
 
         // TLV header
         self.inner.write_all(&[REC_TYPE_SCHED_EVENT])?;
-        self.inner
-            .write_all(&(EVENT_SIZE as u32).to_le_bytes())?;
+        self.inner.write_all(&(EVENT_SIZE as u32).to_le_bytes())?;
 
         // Event payload
         event.write_to(&mut self.inner)?;
@@ -107,12 +106,9 @@ impl<W: Write + Seek> WperfWriter<W> {
         // --- Write section table ---
         let section_table_offset = self.inner.stream_position()?;
         // Section entry: id(u32) + offset(u64) + size(u64)
-        self.inner
-            .write_all(&SECTION_ID_METADATA.to_le_bytes())?;
-        self.inner
-            .write_all(&metadata_offset.to_le_bytes())?;
-        self.inner
-            .write_all(&metadata_size.to_le_bytes())?;
+        self.inner.write_all(&SECTION_ID_METADATA.to_le_bytes())?;
+        self.inner.write_all(&metadata_offset.to_le_bytes())?;
+        self.inner.write_all(&metadata_size.to_le_bytes())?;
 
         // --- Backfill header ---
         self.header.section_table_offset = section_table_offset;
@@ -278,7 +274,8 @@ mod tests {
         assert_eq!(parsed, ev);
 
         // Read footer metadata
-        buf.seek(SeekFrom::Start(header.section_table_offset)).unwrap();
+        buf.seek(SeekFrom::Start(header.section_table_offset))
+            .unwrap();
         let (sec_id, meta_offset, meta_size) = read_section_entry(&mut buf).unwrap();
         assert_eq!(sec_id, SECTION_ID_METADATA);
         assert_eq!(meta_offset, data_end);
@@ -307,7 +304,8 @@ mod tests {
         // Read metadata from footer
         buf.seek(SeekFrom::Start(0)).unwrap();
         let header = WprfHeader::read_from(&mut buf).unwrap();
-        buf.seek(SeekFrom::Start(header.section_table_offset)).unwrap();
+        buf.seek(SeekFrom::Start(header.section_table_offset))
+            .unwrap();
         let (_, meta_offset, meta_size) = read_section_entry(&mut buf).unwrap();
         let mut meta_buf = vec![0u8; meta_size as usize];
         buf.seek(SeekFrom::Start(meta_offset)).unwrap();
@@ -316,8 +314,7 @@ mod tests {
         assert_eq!(ec, Some(10));
         assert_eq!(dc, Some(5));
 
-        let expected_data_end =
-            HEADER_SIZE + 10 * (TLV_HEADER_SIZE + EVENT_SIZE);
+        let expected_data_end = HEADER_SIZE + 10 * (TLV_HEADER_SIZE + EVENT_SIZE);
         assert_eq!(header.data_section_end_offset, expected_data_end as u64);
     }
 
@@ -333,7 +330,8 @@ mod tests {
         assert!(header.section_table_offset > 0);
 
         // Metadata should still have event_count=0
-        buf.seek(SeekFrom::Start(header.section_table_offset)).unwrap();
+        buf.seek(SeekFrom::Start(header.section_table_offset))
+            .unwrap();
         let (_, meta_offset, meta_size) = read_section_entry(&mut buf).unwrap();
         let mut meta_buf = vec![0u8; meta_size as usize];
         buf.seek(SeekFrom::Start(meta_offset)).unwrap();
@@ -355,8 +353,7 @@ mod tests {
         }
 
         // After 1024 events, data_section_end_offset should be updated
-        let expected_offset =
-            HEADER_SIZE as u64 + 1024 * (TLV_HEADER_SIZE + EVENT_SIZE) as u64;
+        let expected_offset = HEADER_SIZE as u64 + 1024 * (TLV_HEADER_SIZE + EVENT_SIZE) as u64;
         assert_eq!(w.header.data_section_end_offset, expected_offset);
     }
 
@@ -389,7 +386,8 @@ mod tests {
 
         buf.seek(SeekFrom::Start(0)).unwrap();
         let header = WprfHeader::read_from(&mut buf).unwrap();
-        buf.seek(SeekFrom::Start(header.section_table_offset)).unwrap();
+        buf.seek(SeekFrom::Start(header.section_table_offset))
+            .unwrap();
         let (_, meta_offset, meta_size) = read_section_entry(&mut buf).unwrap();
         let mut meta_buf = vec![0u8; meta_size as usize];
         buf.seek(SeekFrom::Start(meta_offset)).unwrap();
