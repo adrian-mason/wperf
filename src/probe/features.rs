@@ -193,6 +193,7 @@ fn file_contains_line(path: &Path, needle: &str) -> Result<bool, ProbeError> {
 ///
 /// Requires `CAP_BPF` or `CAP_SYS_ADMIN`.
 #[cfg(feature = "bpf")]
+#[mutants::skip] // cfg-gated out in default build; mutation has no observable effect on tests
 pub fn probe_ringbuf() -> Result<TransportMode, ProbeError> {
     use libbpf_rs::MapType;
 
@@ -221,6 +222,7 @@ pub fn probe_ringbuf() -> Result<TransportMode, ProbeError> {
 /// Uses `libbpf_probe_bpf_helper` to check `BPF_FUNC_loop` availability
 /// for `BPF_PROG_TYPE_TRACEPOINT` programs.
 #[cfg(feature = "bpf")]
+#[mutants::skip] // cfg-gated out in default build; mutation has no observable effect on tests
 pub fn probe_bpf_loop() -> Result<bool, ProbeError> {
     // libbpf_probe_bpf_helper(BPF_PROG_TYPE_TRACEPOINT, BPF_FUNC_loop, NULL)
     // libbpf-rs exposes this via libbpf_sys.
@@ -258,6 +260,7 @@ pub fn probe_bpf_loop() -> Result<bool, ProbeError> {
 ///
 /// Full implementation depends on skeleton infrastructure from task #5.
 #[cfg(feature = "bpf")]
+#[mutants::skip] // cfg-gated out in default build; mutation has no observable effect on tests
 pub fn probe_tp_btf() -> Result<TracepointMode, ProbeError> {
     // TODO(probe): Implement minimal tp_btf attach test once skeleton infra lands.
     // For now, attempt detection via BTF type existence as a proxy:
@@ -278,6 +281,7 @@ pub fn probe_tp_btf() -> Result<TracepointMode, ProbeError> {
 /// Requires loading a minimal BPF program that attaches via fentry.
 /// Full implementation depends on skeleton infrastructure from task #5.
 #[cfg(feature = "bpf")]
+#[mutants::skip] // cfg-gated out in default build; mutation has no observable effect on tests
 pub fn probe_fentry() -> Result<bool, ProbeError> {
     // TODO(probe): Implement minimal fentry attach test once skeleton infra lands.
     Ok(false)
@@ -583,15 +587,17 @@ mod tests {
 
     #[test]
     fn file_contains_line_permission_denied_propagates() {
-        // Create a directory where a file name exists but can't be read.
-        // On most systems, trying to open a directory as a file gives an error
-        // that is NOT NotFound — it should propagate, not return Ok(false).
+        use std::os::unix::fs::PermissionsExt;
+
         let dir = TempDir::new("perm_denied");
         let target = dir.path().join("unreadable");
-        fs::create_dir_all(&target).unwrap();
-        // Opening a directory as a regular file returns an error on Linux.
+        fs::write(&target, "some content\n").unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o000)).unwrap();
+
         let result = file_contains_line(&target, "anything");
-        // The error should propagate (not silently return false).
+        // Restore permissions before assert so cleanup succeeds.
+        let _ = fs::set_permissions(&target, fs::Permissions::from_mode(0o644));
+        // Non-NotFound errors (PermissionDenied) must propagate, not return Ok(false).
         assert!(result.is_err());
     }
 
