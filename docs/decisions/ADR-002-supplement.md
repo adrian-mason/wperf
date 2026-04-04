@@ -109,7 +109,7 @@ static __always_inline __s64 get_task_state(void *task) {
 
 | Feature | Probe Method | Degradation |
 |---------|-------------|-------------|
-| **BTF (vmlinux)** | Check `/sys/kernel/btf/vmlinux` | Embedded BTF fallback (`min_core_btfs`); if still fails, **refuse to run** (`EOPNOTSUPP`) |
+| **BTF (vmlinux)** | Check `/sys/kernel/btf/vmlinux` | **Phase 1: refuse to run (`EOPNOTSUPP`).** Minimum supported: RHEL/Rocky 8.2+ (`CONFIG_DEBUG_INFO_BTF=y`). Embedded BTF fallback deferred. |
 
 ### Implication for wPerf
 
@@ -117,7 +117,7 @@ wPerf must either:
 - **(a)** Ship embedded BTF for target kernel versions (RHEL 8.x, Ubuntu 20.04/22.04 LTS, etc.) using the `min_core_btfs` pattern, or
 - **(b)** Accept that kernels without BTF (pre-5.4 without backports, custom kernels without `CONFIG_DEBUG_INFO_BTF`) are unsupported
 
-Option (b) is simpler and aligns with the recommended minimum kernel of 5.4. Option (a) extends reach to RHEL 8.0-8.1 (4.18 without BTF) but adds build complexity. This is a scope decision for Phase 1.
+**Phase 1 decision (2026-04-04): Option (b) adopted.** Minimum supported kernel: Rocky Linux 8.9 / RHEL 8.2+ (kernel 4.18.0-193+, `CONFIG_DEBUG_INFO_BTF=y`). RHEL 8.0-8.1 (EOL, no BTF) are unsupported. Option (a) deferred to future evaluation if demand arises.
 
 ## Finding 3: cgroupv2 Filtering — Implementation Pattern (Q3)
 
@@ -177,10 +177,10 @@ This is correct. The implementation should:
 
 ## Consequences
 
-1. **ADR-002 probe matrix correction**: The BTF row must be updated to replace "hardcoded offsets" with "refuse to run (`EOPNOTSUPP`)" as the final fallback. This correction will propagate to `final-design.md` section 1.3 when that document is updated.
+1. **ADR-002 probe matrix correction**: The BTF row has been updated to "refuse to run (`EOPNOTSUPP`)" as the final fallback, propagated to `final-design.md` section 1.3.
 
-2. **Embedded BTF scope decision**: The project must decide during Phase 1 whether to ship embedded BTF for pre-5.4 kernels or accept BTF as a hard requirement. Given the recommended minimum of 5.4 (which has BTF enabled in all major distributions), accepting the hard requirement is the pragmatic choice.
+2. **Embedded BTF scope decision (resolved 2026-04-04)**: Option (b) adopted — BTF is a hard requirement for Phase 1. Minimum supported: Rocky 8.9 / RHEL 8.2+ (`CONFIG_DEBUG_INFO_BTF=y`). Embedded BTF (`min_core_btfs`) deferred to future evaluation.
 
-3. **User-space transport abstraction**: The `EventTransport` Rust trait must mirror the `bpf_buffer` pattern from `compat.c` — specifically the `new()` → `open()` → `poll()` lifecycle with probe-based mode selection at construction time.
+3. **User-space transport abstraction**: Uses `enum BpfBuffer { Ring(RingBufTransport), Perf(PerfBufTransport) }` — closed-variant enum dispatch instead of `Box<dyn Trait>`. Rationale: no heap indirection, no vtable, closed variant set (only Ring/Perf), compiler can inline through match. API: `poll(&mut self, timeout) -> Result<Vec<WperfEvent>>`, `drop_count(&self) -> u64`, `flush(&mut self) -> Vec<WperfEvent>`. The `bpf_buffer` pattern from `compat.c` is the reference design; BPF side vendors `compat.bpf.h` directly, userspace implements equivalent logic in Rust.
 
 4. **Cgroup filtering architecture**: Follows the established `BPF_MAP_TYPE_CGROUP_ARRAY` + `bpf_current_task_under_cgroup()` pattern. cgroupv1 is explicitly not supported.
