@@ -16,6 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install BPF build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libelf-dev zlib1g-dev
+
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.94.0
@@ -31,6 +34,12 @@ jobs:
 
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo check (bpf feature)
+        run: cargo check --features bpf
+
+      - name: cargo clippy (bpf feature)
+        run: cargo clippy --all-targets --features bpf -- -D warnings
 
       - name: cargo test
         run: cargo test
