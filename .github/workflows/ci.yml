@@ -50,6 +50,37 @@ jobs:
       - name: differential (Rust vs Python)
         run: cargo test --test differential
 
+  coverage:
+    name: Coverage (cargo-llvm-cov)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Install BPF build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libelf-dev zlib1g-dev
+
+      - name: Generate coverage
+        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: lcov.info
+
+      - name: Coverage summary
+        run: cargo llvm-cov --all-features --workspace --text
+
   supply-chain:
     name: Supply Chain (cargo-deny + cargo-audit)
     runs-on: ubuntu-latest
