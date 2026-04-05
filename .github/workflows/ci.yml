@@ -19,7 +19,7 @@ jobs:
       - name: Install BPF build dependencies
         run: sudo apt-get update && sudo apt-get install -y libelf-dev zlib1g-dev
 
-      - uses: dtolnay/rust-toolchain@3c5f7ea2 # master
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
           toolchain: 1.94.0
           components: clippy, rustfmt
@@ -59,7 +59,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4 # 34e11487
 
-      - uses: dtolnay/rust-toolchain@3c5f7ea2 # master
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
           toolchain: 1.94.0
           components: llvm-tools-preview
@@ -90,7 +90,7 @@ jobs:
       - name: cargo-deny
         uses: EmbarkStudios/cargo-deny-action@v2 # 82eb9f62
 
-      - uses: dtolnay/rust-toolchain@3c5f7ea2 # master
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
           toolchain: 1.94.0
 
@@ -108,7 +108,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4 # 34e11487
 
-      - uses: dtolnay/rust-toolchain@3c5f7ea2 # master
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
           toolchain: 1.94.0
 
