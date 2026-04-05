@@ -63,8 +63,9 @@ fn bench_cascade(c: &mut Criterion) {
         });
     }
 
-    // Dense graphs are expensive — only small sizes.
-    for &n in &[8, 16] {
+    // Dense graphs are expensive — complete graph causes exponential path explosion
+    // in cascade recursion. Keep n small to avoid multi-minute runtimes.
+    for &n in &[4, 8] {
         let dense = build_dense(n);
         group.bench_with_input(BenchmarkId::new("dense", n), &dense, |b, g| {
             b.iter(|| cascade_engine(g, None).unwrap());
