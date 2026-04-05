@@ -14,17 +14,17 @@ jobs:
     name: Check + Clippy + Test + Fmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4 # 34e11487
 
       - name: Install BPF build dependencies
         run: sudo apt-get update && sudo apt-get install -y libelf-dev zlib1g-dev
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@3c5f7ea2 # master
         with:
           toolchain: 1.94.0
           components: clippy, rustfmt
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2 # 42dc69e1
 
       - name: cargo fmt
         run: cargo fmt --check
@@ -57,14 +57,14 @@ jobs:
     name: Coverage (cargo-llvm-cov)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4 # 34e11487
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@3c5f7ea2 # master
         with:
           toolchain: 1.94.0
           components: llvm-tools-preview
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2 # 42dc69e1
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -73,7 +73,7 @@ jobs:
         run: cargo llvm-cov --workspace --lcov --output-path lcov.info
 
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4 # ea165f8d
         with:
           name: coverage-report
           path: lcov.info
@@ -85,16 +85,16 @@ jobs:
     name: Supply Chain (cargo-deny + cargo-audit)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4 # 34e11487
 
       - name: cargo-deny
-        uses: EmbarkStudios/cargo-deny-action@v2
+        uses: EmbarkStudios/cargo-deny-action@v2 # 82eb9f62
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@3c5f7ea2 # master
         with:
           toolchain: 1.94.0
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2 # 42dc69e1
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
@@ -106,13 +106,13 @@ jobs:
     name: Mutation Testing (≥90% kill rate)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4 # 34e11487
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@3c5f7ea2 # master
         with:
           toolchain: 1.94.0
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2 # 42dc69e1
 
       - name: Install cargo-mutants
         run: cargo install cargo-mutants --locked
@@ -123,7 +123,7 @@ jobs:
 
       - name: Upload mutation report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4 # ea165f8d
         with:
           name: mutants-report
           path: mutants.out/
