@@ -110,9 +110,7 @@ impl Default for ProbePaths<'_> {
             cgroup_controllers: Path::new("/sys/fs/cgroup/cgroup.controllers"),
             tracing_events: Path::new("/sys/kernel/tracing/events"),
             kprobe_blacklist: Path::new("/sys/kernel/debug/kprobes/blacklist"),
-            available_filter_functions: Path::new(
-                "/sys/kernel/debug/tracing/available_filter_functions",
-            ),
+            available_filter_functions: Path::new("/sys/kernel/tracing/available_filter_functions"),
         }
     }
 }
