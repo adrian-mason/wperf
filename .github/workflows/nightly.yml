@@ -1,3 +1,5 @@
+# Nightly CI — visibility and periodic deep checks only.
+# NOT a merge gate. Do not add to branch protection required checks.
 name: Nightly
 
 on:
@@ -17,13 +19,13 @@ jobs:
       matrix:
         sanitizer: [address, thread]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4 # 34e11487
 
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
         with:
           components: rust-src
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2 # 42dc69e1
         with:
           key: sanitizer-${{ matrix.sanitizer }}
 
@@ -39,13 +41,13 @@ jobs:
     name: Benchmark Regression (iai-callgrind)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4 # 34e11487
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
           toolchain: 1.94.0
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2 # 42dc69e1
 
       - name: Install valgrind
         run: sudo apt-get update && sudo apt-get install -y valgrind
