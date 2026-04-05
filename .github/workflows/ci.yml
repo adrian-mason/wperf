@@ -50,6 +50,9 @@ jobs:
       - name: differential (Rust vs Python)
         run: cargo test --test differential
 
+      - name: bench compile check
+        run: cargo bench --no-run
+
   coverage:
     name: Coverage (cargo-llvm-cov)
     runs-on: ubuntu-latest
