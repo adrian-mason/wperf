@@ -4,9 +4,9 @@
  *
  * Implements ADR-013: dual-variant sched_switch + sched_wakeup probes.
  *   - Primary: tp_btf/sched_switch + tp_btf/sched_wakeup (kernel 5.5+)
- *     Direct task_struct * access, no BPF_CORE_READ overhead on hot path.
+ *     BTF-typed pointers: direct field access for stable fields (pid, tgid).
  *   - Fallback: raw_tp/sched_switch + raw_tp/sched_wakeup (kernel 4.17+)
- *     Uses BPF_CORE_READ for field access.
+ *     Uses BPF_CORE_READ for all task_struct field access.
  *
  * Transport: ADR-004 dual-mode ringbuf/perfarray via reserve_buf/submit_buf
  * abstraction. Map reconfiguration happens in user-space between open()/load().
@@ -103,7 +103,9 @@ static __always_inline void fill_timestamp_and_cpu(struct wperf_event *e)
 /* --------------------------------------------------------------------------
  * tp_btf variants (kernel 5.5+)
  *
- * Direct task_struct * access — no BPF_CORE_READ needed for most fields.
+ * BTF-typed task_struct pointers allow direct field access for stable
+ * fields (pid, tgid). BPF_CORE_READ still used for __state (CO-RE
+ * relocation needed — field name changed across kernel versions).
  * Controlled by set_autoload(): disabled on kernels without tp_btf support.
  * -------------------------------------------------------------------------- */
 
@@ -121,13 +123,15 @@ int BPF_PROG(handle_sched_switch_btf,
 
 	fill_timestamp_and_cpu(e);
 	e->event_type = WPERF_EVENT_SWITCH;
+	/* __state needs BPF_CORE_READ for CO-RE relocation (field name
+	 * changed across kernel versions). pid/tgid are stable — direct
+	 * access is safe with tp_btf's BTF-typed pointers. */
 	e->prev_state = (__u8)BPF_CORE_READ(prev, __state);
 
-	/* tp_btf gives direct task_struct pointers. */
-	e->prev_tid = BPF_CORE_READ(prev, pid);
-	e->prev_pid = BPF_CORE_READ(prev, tgid);
-	e->next_tid = BPF_CORE_READ(next, pid);
-	e->next_pid = BPF_CORE_READ(next, tgid);
+	e->prev_tid = prev->pid;
+	e->prev_pid = prev->tgid;
+	e->next_tid = next->pid;
+	e->next_pid = next->tgid;
 
 	/* pid/tid from the BPF context (current task at switch time = prev). */
 	__u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -152,9 +156,9 @@ int BPF_PROG(handle_sched_wakeup_btf,
 	e->event_type = WPERF_EVENT_WAKEUP;
 	e->prev_state = 0;
 
-	/* Woken thread. */
-	e->next_tid = BPF_CORE_READ(p, pid);
-	e->next_pid = BPF_CORE_READ(p, tgid);
+	/* Woken thread — direct access via tp_btf BTF-typed pointer. */
+	e->next_tid = p->pid;
+	e->next_pid = p->tgid;
 
 	/* Waker = current task. */
 	__u64 pid_tgid = bpf_get_current_pid_tgid();
