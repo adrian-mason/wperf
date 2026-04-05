@@ -95,7 +95,7 @@ static __always_inline void submit_buf(void *ctx, struct wperf_event *e)
 
 static __always_inline void fill_timestamp_and_cpu(struct wperf_event *e)
 {
-	e->timestamp_ns = bpf_ktime_get_boot_ns();
+	e->timestamp_ns = bpf_ktime_get_ns();
 	e->cpu = (__u16)bpf_get_smp_processor_id();
 	e->flags = 0;
 }
