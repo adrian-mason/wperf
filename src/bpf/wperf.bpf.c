@@ -156,18 +156,17 @@ int BPF_PROG(handle_sched_wakeup_btf,
 	e->event_type = WPERF_EVENT_WAKEUP;
 	e->prev_state = 0;
 
-	/* Woken thread — direct access via tp_btf BTF-typed pointer. */
+	/* Wakee — direct access via tp_btf BTF-typed pointer. */
 	e->next_tid = p->pid;
 	e->next_pid = p->tgid;
 
-	/* Waker = current task. */
+	/* Waker = current task. prev_tid/prev_pid encode waker identity
+	 * per the event contract in src/format/event.rs. */
 	__u64 pid_tgid = bpf_get_current_pid_tgid();
 	e->pid = (__u32)(pid_tgid >> 32);
 	e->tid = (__u32)pid_tgid;
-
-	/* prev_tid/prev_pid not meaningful for wakeup; zero them. */
-	e->prev_tid = 0;
-	e->prev_pid = 0;
+	e->prev_tid = e->tid;
+	e->prev_pid = e->pid;
 
 	submit_buf(ctx, e);
 	return 0;
@@ -227,12 +226,13 @@ int BPF_PROG(handle_sched_wakeup_raw,
 	e->next_tid = BPF_CORE_READ(p, pid);
 	e->next_pid = BPF_CORE_READ(p, tgid);
 
+	/* Waker = current task. prev_tid/prev_pid encode waker identity
+	 * per the event contract in src/format/event.rs. */
 	__u64 pid_tgid = bpf_get_current_pid_tgid();
 	e->pid = (__u32)(pid_tgid >> 32);
 	e->tid = (__u32)pid_tgid;
-
-	e->prev_tid = 0;
-	e->prev_pid = 0;
+	e->prev_tid = e->tid;
+	e->prev_pid = e->pid;
 
 	submit_buf(ctx, e);
 	return 0;
