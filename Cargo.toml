@@ -17,10 +17,15 @@ serde_json = "1"
 
 [dev-dependencies]
 criterion = { version = "0.6", features = ["html_reports"] }
+iai-callgrind = "0.16"
 proptest = "1.11"
 
 [[bench]]
 name = "cascade"
+harness = false
+
+[[bench]]
+name = "cascade_iai"
 harness = false
 
 [lints.clippy]
