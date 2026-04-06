@@ -6,9 +6,10 @@
 //! 2. `sched_wakeup` → record waker as cause of off-CPU thread
 //! 3. `sched_switch` (`next_tid` matches off-CPU thread) → finalize wait edge
 //!
-//! This module does **not** implement the full §3.2 4-step FSM (Parse /
-//! Reorder / Correlate / Orphan handling). Parse and Reorder are upstream
-//! pipeline stages; Orphan handling is planned for a later task.
+//! This module implements the correlate sub-step plus minimal
+//! orphan-accounting needed for `unmatched_wakeup_count`, but not the
+//! full surrounding parse/reorder pipeline. Parse and Reorder are
+//! upstream pipeline stages.
 //!
 //! # Input contract
 //!
