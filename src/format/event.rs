@@ -205,6 +205,16 @@ mod tests {
     }
 
     #[test]
+    fn event_type_enum_accessor() {
+        // Kill mutation: event_type_enum → None
+        let ev = sample_switch_event();
+        assert_eq!(ev.event_type_enum(), Some(EventType::Switch));
+
+        let ev2 = sample_wakeup_event();
+        assert_eq!(ev2.event_type_enum(), Some(EventType::Wakeup));
+    }
+
+    #[test]
     fn repr_c_layout() {
         // Verify repr(C) layout: u64 alignment, 40B with flags field (no wasted padding)
         assert_eq!(std::mem::align_of::<WperfEvent>(), 8);
