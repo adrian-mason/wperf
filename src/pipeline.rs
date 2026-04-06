@@ -8,10 +8,12 @@
 //!
 //! # Sorting
 //!
-//! Events are sorted with `Vec::sort()` over `WperfEvent`'s derived `Ord`,
-//! which provides deterministic full-order sorting. `timestamp_ns` is the
-//! primary key; remaining fields give a deterministic tie-break for
-//! equal-timestamp events. This matches [`ReorderBuf`]'s live-path
+//! Events are sorted with `Vec::sort_unstable()` over `WperfEvent`'s
+//! derived `Ord`, which provides deterministic full-order sorting.
+//! `timestamp_ns` is the primary key; remaining fields give a deterministic
+//! tie-break for equal-timestamp events. Stability is unnecessary: events
+//! with identical `Ord` keys are semantically identical, so reordering them
+//! has no observable effect. This matches [`ReorderBuf`]'s live-path
 //! `BinaryHeap<Reverse<WperfEvent>>` semantics.
 //!
 //! # Empty traces
@@ -82,9 +84,10 @@ pub fn build_wait_for_graph<R: Read + Seek>(
     let events_read = events.len() as u64;
 
     // Step 2: Sort — full-order sort over WperfEvent::Ord for deterministic
-    // tie-break on equal timestamps. Do NOT use sort_by_key(timestamp_ns)
-    // alone, as that loses determinism for equal-timestamp events.
-    events.sort();
+    // ordering. sort_unstable() is sufficient: events with identical Ord keys
+    // are semantically identical. Do NOT use sort_by_key(timestamp_ns) alone,
+    // as that loses determinism for equal-timestamp events.
+    events.sort_unstable();
 
     // Step 3: Correlate
     let (graph, correlation) = correlate::correlate_events(&events);
