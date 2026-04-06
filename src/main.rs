@@ -1,3 +1,24 @@
-fn main() {
-    println!("Hello, world!");
+use std::process::ExitCode;
+
+use clap::Parser;
+use wperf::cli::{Cli, Command};
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+
+    let result = match cli.command {
+        Command::Record(args) => wperf::record::run(&args),
+        Command::Report(_args) => {
+            eprintln!("wperf report: not yet implemented (planned for W3 #17)");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("wperf: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
