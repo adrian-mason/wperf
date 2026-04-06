@@ -66,6 +66,7 @@ __u64 drop_counter = 0;
  * implementation and provenance details.
  */
 #include "compat.bpf.h"
+#include "core_fixes.bpf.h"
 
 /* --------------------------------------------------------------------------
  * Helper: fill common event fields
@@ -104,7 +105,7 @@ int BPF_PROG(handle_sched_switch_btf,
 	/* __state needs BPF_CORE_READ for CO-RE relocation (field name
 	 * changed across kernel versions). pid/tgid are stable — direct
 	 * access is safe with tp_btf's BTF-typed pointers. */
-	e->prev_state = (__u8)BPF_CORE_READ(prev, __state);
+	e->prev_state = (__u8)get_task_state(prev);
 
 	e->prev_tid = prev->pid;
 	e->prev_pid = prev->tgid;
@@ -171,7 +172,7 @@ int BPF_PROG(handle_sched_switch_raw,
 
 	fill_timestamp_and_cpu(e);
 	e->event_type = WPERF_EVENT_SWITCH;
-	e->prev_state = (__u8)BPF_CORE_READ(prev, __state);
+	e->prev_state = (__u8)get_task_state(prev);
 
 	/* raw_tp: task_struct pointers require BPF_CORE_READ. */
 	e->prev_tid = BPF_CORE_READ(prev, pid);
