@@ -200,6 +200,31 @@ mod tests {
     }
 
     #[test]
+    fn header_error_display() {
+        // Kill mutation: Display::fmt → Ok(Default::default())
+        let err = HeaderError::BadMagic;
+        let msg = format!("{err}");
+        assert!(!msg.is_empty());
+        assert!(msg.contains("magic"));
+
+        let err = HeaderError::UnsupportedVersion(99);
+        assert!(format!("{err}").contains("99"));
+
+        let err = HeaderError::Io(std::io::Error::other("test"));
+        assert!(format!("{err}").contains("test"));
+    }
+
+    #[test]
+    fn header_error_source() {
+        // Kill mutations: Error::source → None, delete Self::Io(e) arm
+        let io_err = HeaderError::Io(std::io::Error::other("x"));
+        assert!(std::error::Error::source(&io_err).is_some());
+
+        let bad_magic = HeaderError::BadMagic;
+        assert!(std::error::Error::source(&bad_magic).is_none());
+    }
+
+    #[test]
     fn header_io_roundtrip() {
         let h = WprfHeader::new();
         let mut buf = Vec::new();
