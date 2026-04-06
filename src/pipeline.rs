@@ -58,7 +58,7 @@ impl From<ReaderError> for PipelineError {
 }
 
 /// Aggregate statistics from the pipeline.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct PipelineStats {
     /// Total events read from the `.wperf` file.
     pub events_read: u64,

@@ -8,5 +8,6 @@ pub mod output;
 pub mod pipeline;
 pub mod probe;
 pub mod record;
+pub mod report;
 pub mod scc;
 pub mod transport;
