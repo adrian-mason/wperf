@@ -33,8 +33,8 @@ pub struct RecordArgs {
     #[arg(short, long, default_value = "wperf.data")]
     pub output: PathBuf,
 
-    /// Recording duration in seconds. If omitted, records until Ctrl+C.
-    #[arg(short, long)]
+    /// Recording duration in seconds (must be positive). If omitted, records until Ctrl+C.
+    #[arg(short, long, value_parser = parse_positive_duration)]
     pub duration: Option<f64>,
 
     /// Transport buffer size in bytes.
@@ -61,6 +61,16 @@ pub struct ReportArgs {
 #[derive(clap::ValueEnum, Clone, Debug)]
 pub enum ReportFormat {
     Json,
+}
+
+/// Parse a positive duration value (rejects zero and negative).
+fn parse_positive_duration(s: &str) -> Result<f64, String> {
+    let val: f64 = s.parse().map_err(|e| format!("{e}"))?;
+    if val > 0.0 {
+        Ok(val)
+    } else {
+        Err("duration must be positive".to_string())
+    }
 }
 
 #[cfg(test)]
@@ -126,6 +136,18 @@ mod tests {
     fn parse_version_subcommand() {
         let cli = Cli::parse_from(["wperf", "version"]);
         assert!(matches!(cli.command, Command::Version));
+    }
+
+    #[test]
+    fn record_rejects_zero_duration() {
+        let result = Cli::try_parse_from(["wperf", "record", "-d", "0"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn record_rejects_negative_duration() {
+        let result = Cli::try_parse_from(["wperf", "record", "-d", "-1"]);
+        assert!(result.is_err());
     }
 
     #[test]
