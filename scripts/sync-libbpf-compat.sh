@@ -13,6 +13,11 @@
 
 set -euo pipefail
 
+# Resolve paths before any cd
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+VENDORED_FILE="$REPO_ROOT/src/bpf/compat.bpf.h"
+
 BCC_REPO="${1:-/workspace/kernel/bcc}"
 UPSTREAM_FILE="$BCC_REPO/libbpf-tools/compat.bpf.h"
 
@@ -31,11 +36,6 @@ echo ""
 CURRENT_COMMIT=$(git log --format='%H' -1 -- libbpf-tools/compat.bpf.h)
 echo "Latest upstream commit: $CURRENT_COMMIT"
 echo ""
-
-# Show diff between upstream and our vendored version
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-VENDORED_FILE="$REPO_ROOT/src/bpf/compat.bpf.h"
 
 echo "=== Diff: upstream vs vendored ==="
 diff -u "$UPSTREAM_FILE" "$VENDORED_FILE" || true
