@@ -12,6 +12,10 @@ fn main() -> ExitCode {
             eprintln!("wperf report: not yet implemented (planned for W3 #17)");
             return ExitCode::FAILURE;
         }
+        Command::Version => {
+            println!("wperf {}", env!("CARGO_PKG_VERSION"));
+            return ExitCode::SUCCESS;
+        }
     };
 
     match result {

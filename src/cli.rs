@@ -21,6 +21,9 @@ pub enum Command {
 
     /// Analyze a .wperf file and produce a performance report.
     Report(ReportArgs),
+
+    /// Print version information.
+    Version,
 }
 
 /// Arguments for the `record` subcommand.
@@ -73,7 +76,7 @@ mod tests {
                 assert!(args.duration.is_none());
                 assert!(args.buffer_size.is_none());
             }
-            Command::Report(_) => panic!("expected Record"),
+            _ => panic!("expected Record"),
         }
     }
 
@@ -95,7 +98,7 @@ mod tests {
                 assert!((args.duration.unwrap() - 10.5).abs() < f64::EPSILON);
                 assert_eq!(args.buffer_size.unwrap(), 8_388_608);
             }
-            Command::Report(_) => panic!("expected Record"),
+            _ => panic!("expected Record"),
         }
     }
 
@@ -106,7 +109,7 @@ mod tests {
             Command::Report(args) => {
                 assert_eq!(args.input, PathBuf::from("trace.wperf"));
             }
-            Command::Record(_) => panic!("expected Report"),
+            _ => panic!("expected Report"),
         }
     }
 
@@ -115,8 +118,14 @@ mod tests {
         let cli = Cli::parse_from(["wperf", "record", "-o", "out.wperf"]);
         match cli.command {
             Command::Record(args) => assert_eq!(args.output, PathBuf::from("out.wperf")),
-            Command::Report(_) => panic!("expected Record"),
+            _ => panic!("expected Record"),
         }
+    }
+
+    #[test]
+    fn parse_version_subcommand() {
+        let cli = Cli::parse_from(["wperf", "version"]);
+        assert!(matches!(cli.command, Command::Version));
     }
 
     #[test]
@@ -126,7 +135,7 @@ mod tests {
             Command::Record(args) => {
                 assert!((args.duration.unwrap() - 5.0).abs() < f64::EPSILON);
             }
-            Command::Report(_) => panic!("expected Record"),
+            _ => panic!("expected Record"),
         }
     }
 }
