@@ -8,8 +8,9 @@
  *   - Fallback: raw_tp/sched_switch + raw_tp/sched_wakeup (kernel 4.17+)
  *     Uses BPF_CORE_READ for all task_struct field access.
  *
- * Transport: ADR-004 dual-mode ringbuf/perfarray via reserve_buf/submit_buf
- * abstraction. Map reconfiguration happens in user-space between open()/load().
+ * Transport: ADR-004 dual-mode ringbuf/perfarray via compat.bpf.h
+ * reserve_buf/submit_buf abstraction (vendored from libbpf-tools).
+ * Map reconfiguration happens in user-space between open()/load().
  *
  * This file is compiled to wperf.bpf.o by libbpf-cargo's SkeletonBuilder.
  * It is NOT compiled as part of the normal cargo build — it requires
@@ -30,6 +31,10 @@
  * between open() and load() based on probe_ringbuf() result:
  *   - RingBuf mode: events is RINGBUF, heap is suppressed (set_autocreate=false)
  *   - PerfArray mode: events is reconfigured to PERF_EVENT_ARRAY, heap is active
+ *
+ * Map declarations are wperf-specific (typed value, sized buffers).
+ * The upstream compat.bpf.h uses generic MAX_EVENT_SIZE/RINGBUF_SIZE;
+ * we declare maps here and let compat.bpf.h reference them by name.
  */
 
 /* Primary event output map. Declared as RINGBUF; user-space may reconfigure
@@ -48,46 +53,19 @@ struct {
 	__type(value, struct wperf_event);
 } heap SEC(".maps");
 
-/* BSS: drop counter for ringbuf path. Incremented when bpf_ringbuf_reserve
- * returns NULL. Read by user-space at end of recording. */
+/* BSS: drop counter for ringbuf path. Incremented by compat.bpf.h's
+ * reserve_buf() when bpf_ringbuf_reserve returns NULL.
+ * Read by user-space at end of recording. */
 __u64 drop_counter = 0;
 
 /* --------------------------------------------------------------------------
- * Buffer abstraction: reserve_buf / submit_buf
+ * Buffer abstraction: vendored from libbpf-tools compat.bpf.h
  * --------------------------------------------------------------------------
- * Uses CO-RE bpf_core_type_exists to select ringbuf vs perfarray path
- * at BPF load time. This avoids runtime branching on the hot path.
- *
- * Note: bpf_core_type_exists(struct bpf_ringbuf) resolves at load time
- * via CO-RE relocations — if the kernel has ringbuf support, the ringbuf
- * path is taken; otherwise the perfarray path.
+ * reserve_buf() / submit_buf() use CO-RE bpf_core_type_exists to select
+ * ringbuf vs perfarray path at BPF load time. See compat.bpf.h for
+ * implementation and provenance details.
  */
-
-static __always_inline struct wperf_event *reserve_buf(void)
-{
-	if (bpf_core_type_exists(struct bpf_ringbuf)) {
-		struct wperf_event *e;
-
-		e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
-		if (!e)
-			__sync_fetch_and_add(&drop_counter, 1);
-		return e;
-	} else {
-		__u32 zero = 0;
-
-		return bpf_map_lookup_elem(&heap, &zero);
-	}
-}
-
-static __always_inline void submit_buf(void *ctx, struct wperf_event *e)
-{
-	if (bpf_core_type_exists(struct bpf_ringbuf)) {
-		bpf_ringbuf_submit(e, 0);
-	} else {
-		bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU,
-				      e, sizeof(*e));
-	}
-}
+#include "compat.bpf.h"
 
 /* --------------------------------------------------------------------------
  * Helper: fill common event fields
@@ -117,7 +95,7 @@ int BPF_PROG(handle_sched_switch_btf,
 {
 	struct wperf_event *e;
 
-	e = reserve_buf();
+	e = reserve_buf(sizeof(*e));
 	if (!e)
 		return 0;
 
@@ -138,7 +116,7 @@ int BPF_PROG(handle_sched_switch_btf,
 	e->pid = (__u32)(pid_tgid >> 32);
 	e->tid = (__u32)pid_tgid;
 
-	submit_buf(ctx, e);
+	submit_buf(ctx, e, sizeof(*e));
 	return 0;
 }
 
@@ -148,7 +126,7 @@ int BPF_PROG(handle_sched_wakeup_btf,
 {
 	struct wperf_event *e;
 
-	e = reserve_buf();
+	e = reserve_buf(sizeof(*e));
 	if (!e)
 		return 0;
 
@@ -168,7 +146,7 @@ int BPF_PROG(handle_sched_wakeup_btf,
 	e->prev_tid = e->tid;
 	e->prev_pid = e->pid;
 
-	submit_buf(ctx, e);
+	submit_buf(ctx, e, sizeof(*e));
 	return 0;
 }
 
@@ -187,7 +165,7 @@ int BPF_PROG(handle_sched_switch_raw,
 {
 	struct wperf_event *e;
 
-	e = reserve_buf();
+	e = reserve_buf(sizeof(*e));
 	if (!e)
 		return 0;
 
@@ -205,7 +183,7 @@ int BPF_PROG(handle_sched_switch_raw,
 	e->pid = (__u32)(pid_tgid >> 32);
 	e->tid = (__u32)pid_tgid;
 
-	submit_buf(ctx, e);
+	submit_buf(ctx, e, sizeof(*e));
 	return 0;
 }
 
@@ -215,7 +193,7 @@ int BPF_PROG(handle_sched_wakeup_raw,
 {
 	struct wperf_event *e;
 
-	e = reserve_buf();
+	e = reserve_buf(sizeof(*e));
 	if (!e)
 		return 0;
 
@@ -234,7 +212,7 @@ int BPF_PROG(handle_sched_wakeup_raw,
 	e->prev_tid = e->tid;
 	e->prev_pid = e->pid;
 
-	submit_buf(ctx, e);
+	submit_buf(ctx, e, sizeof(*e));
 	return 0;
 }
 
