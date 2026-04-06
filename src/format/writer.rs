@@ -423,4 +423,41 @@ mod tests {
         assert_eq!(ec, Some(12345));
         assert_eq!(dc, Some(67));
     }
+
+    #[test]
+    fn parse_metadata_unknown_key_not_misread() {
+        // Kill mutation: line 197 && → || in parse_metadata
+        // An unknown key with val_len==8 must NOT be parsed as DROP_COUNT.
+        let mut buf = Vec::new();
+        write_meta_entry(&mut buf, b"EVENT_COUNT", &42u64.to_le_bytes());
+        write_meta_entry(&mut buf, b"UNKNOWN_KEY", &99u64.to_le_bytes()); // 8-byte value, unknown key
+        let (ec, dc) = parse_metadata(&buf);
+        assert_eq!(ec, Some(42));
+        assert_eq!(dc, None); // must NOT pick up UNKNOWN_KEY as drop_count
+    }
+
+    #[test]
+    fn parse_metadata_truncated_before_value() {
+        // Kill mutations on line 189: pos + val_len > data.len() boundary
+        // Truncate metadata after key but before full value
+        let full = build_metadata(100, 200);
+        // Truncate to cut the second entry's value short
+        let truncated = &full[..full.len() - 3];
+        let (ec, _dc) = parse_metadata(truncated);
+        // First entry should still parse
+        assert_eq!(ec, Some(100));
+    }
+
+    #[test]
+    fn parse_metadata_truncated_before_key() {
+        // Kill mutations on line 181: pos + key_len + 2 > data.len() boundary
+        // Create metadata with only the key_len field of a second entry
+        let mut buf = Vec::new();
+        write_meta_entry(&mut buf, b"EVENT_COUNT", &7u64.to_le_bytes());
+        // Append a key_len that claims 20 bytes but don't provide them
+        buf.extend_from_slice(&20u16.to_le_bytes());
+        let (ec, dc) = parse_metadata(&buf);
+        assert_eq!(ec, Some(7));
+        assert_eq!(dc, None);
+    }
 }
