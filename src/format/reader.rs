@@ -19,7 +19,9 @@ use std::io::{self, Read, Seek, SeekFrom};
 
 use super::event::{EVENT_SIZE, WperfEvent};
 use super::header::{HeaderError, WprfHeader};
-use super::writer::{self, MAX_PAYLOAD_SIZE, REC_TYPE_SCHED_EVENT, SECTION_ID_METADATA, TLV_HEADER_SIZE};
+use super::writer::{
+    self, MAX_PAYLOAD_SIZE, REC_TYPE_SCHED_EVENT, SECTION_ID_METADATA, TLV_HEADER_SIZE,
+};
 
 /// Errors when reading a .wperf file.
 #[derive(Debug)]
