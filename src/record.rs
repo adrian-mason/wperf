@@ -14,7 +14,7 @@
 use std::io;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-#[cfg(any(feature = "bpf", test))]
+#[cfg(test)]
 use std::sync::atomic::Ordering;
 
 use crate::cli::RecordArgs;
@@ -24,6 +24,8 @@ use crate::cli::RecordArgs;
 pub enum RecordError {
     /// BPF feature not compiled in.
     NoBpfSupport,
+    /// BPF skeleton / transport pipeline not yet wired.
+    NotYetWired,
     /// Signal handler registration failed.
     SignalSetup(io::Error),
     /// I/O error (file creation, write, etc).
@@ -38,6 +40,11 @@ impl std::fmt::Display for RecordError {
                 "this build of wperf was compiled without BPF support; \
                  rebuild with `--features bpf`"
             ),
+            Self::NotYetWired => write!(
+                f,
+                "record pipeline not yet wired: BPF skeleton build pipeline is required \
+                 but not yet integrated"
+            ),
             Self::SignalSetup(e) => write!(f, "failed to register signal handler: {e}"),
             Self::Io(e) => write!(f, "record I/O error: {e}"),
         }
@@ -48,7 +55,7 @@ impl std::error::Error for RecordError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::SignalSetup(e) | Self::Io(e) => Some(e),
-            Self::NoBpfSupport => None,
+            Self::NoBpfSupport | Self::NotYetWired => None,
         }
     }
 }
@@ -71,83 +78,42 @@ impl From<io::Error> for RecordError {
 /// 7. Print summary
 pub fn run(args: &RecordArgs) -> Result<(), RecordError> {
     // Step 1: Register signal handlers for graceful shutdown.
-    let running = Arc::new(AtomicBool::new(true));
-    register_signal_handlers(&running)?;
+    // `signal_hook::flag::register` stores `true` into the AtomicBool on signal,
+    // so we start at `false` and poll `stop_requested.load()` to detect shutdown.
+    let stop_requested = Arc::new(AtomicBool::new(false));
+    register_signal_handlers(&stop_requested)?;
 
     // Step 2-6: BPF pipeline (feature-gated).
-    record_impl(args, &running)
+    record_impl(args, &stop_requested)
 }
 
-/// Register SIGINT and SIGTERM handlers that clear the `running` flag.
-fn register_signal_handlers(running: &Arc<AtomicBool>) -> Result<(), RecordError> {
+/// Register SIGINT and SIGTERM handlers that set `stop_requested` to true.
+fn register_signal_handlers(stop_requested: &Arc<AtomicBool>) -> Result<(), RecordError> {
     for sig in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
-        signal_hook::flag::register(sig, Arc::clone(running)).map_err(RecordError::SignalSetup)?;
+        signal_hook::flag::register(sig, Arc::clone(stop_requested))
+            .map_err(RecordError::SignalSetup)?;
     }
     Ok(())
 }
 
 /// BPF-enabled record implementation.
+///
+/// Currently returns `NotYetWired` because the BPF skeleton build pipeline
+/// is not yet integrated. Once skeleton wiring lands, this function will:
+/// 1. `probe_all()` → `FeatureMatrix`
+/// 2. Open skeleton → configure transport (ringbuf/perfarray) → load → attach
+/// 3. Poll transport in loop while `!stop_requested`
+/// 4. Drain → `writer.finish(drop_count)`
 #[cfg(feature = "bpf")]
-fn record_impl(args: &RecordArgs, running: &Arc<AtomicBool>) -> Result<(), RecordError> {
-    use std::fs::File;
-    use std::io::BufWriter;
-    use std::time::Instant;
-
-    use crate::format::writer::WperfWriter;
-
-    eprintln!("wperf: recording to {} ...", args.output.display());
-    if let Some(d) = args.duration {
-        eprintln!("wperf: duration limit: {d:.1}s");
-    }
-
-    // Create output file and writer.
-    let file = File::create(&args.output)?;
-    let mut writer = WperfWriter::new(BufWriter::new(file))?;
-
-    // TODO: probe_all() → FeatureMatrix → skeleton open → configure → load → attach
-    // This is blocked on the BPF skeleton build pipeline (#5 closeout).
-    //
-    // For now, the record loop structure is in place but there is no
-    // transport to poll. We write an empty trace with a valid footer.
-
-    let start = Instant::now();
-    let deadline = args
-        .duration
-        .map(|d| start + std::time::Duration::from_secs_f64(d));
-
-    // Event collection loop (placeholder — no transport yet).
-    while running.load(Ordering::Relaxed) {
-        if let Some(dl) = deadline {
-            if Instant::now() >= dl {
-                break;
-            }
-        }
-        // Once transport is wired:
-        //   transport.poll(100, &mut |event| { writer.write_event(event).unwrap(); });
-        //
-        // For now, just sleep briefly to avoid busy-looping.
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-
-    // Drain + finalize.
-    // Once transport is wired: transport.drain(...)
-    let drop_count = 0_u64; // Will come from transport.drop_count()
-    let event_count = writer.event_count();
-    writer.finish(drop_count)?;
-
-    let elapsed = start.elapsed();
-    eprintln!(
-        "wperf: recorded {event_count} events in {:.1}s ({drop_count} drops) → {}",
-        elapsed.as_secs_f64(),
-        args.output.display(),
-    );
-
-    Ok(())
+fn record_impl(_args: &RecordArgs, _stop_requested: &Arc<AtomicBool>) -> Result<(), RecordError> {
+    // The BPF skeleton build pipeline is not yet wired.
+    // Returning an explicit error avoids producing a misleading empty trace.
+    Err(RecordError::NotYetWired)
 }
 
 /// Non-BPF build: runtime error at invocation boundary.
 #[cfg(not(feature = "bpf"))]
-fn record_impl(_args: &RecordArgs, _running: &Arc<AtomicBool>) -> Result<(), RecordError> {
+fn record_impl(_args: &RecordArgs, _stop_requested: &Arc<AtomicBool>) -> Result<(), RecordError> {
     Err(RecordError::NoBpfSupport)
 }
 
@@ -158,10 +124,10 @@ mod tests {
 
     #[test]
     fn signal_handler_registration_succeeds() {
-        let running = Arc::new(AtomicBool::new(true));
-        // Should not panic or error on a normal system.
-        register_signal_handlers(&running).unwrap();
-        assert!(running.load(Ordering::Relaxed));
+        let stop_requested = Arc::new(AtomicBool::new(false));
+        register_signal_handlers(&stop_requested).unwrap();
+        // Flag should still be false (no signal sent).
+        assert!(!stop_requested.load(Ordering::Relaxed));
     }
 
     #[test]
@@ -170,6 +136,14 @@ mod tests {
         let msg = format!("{err}");
         assert!(msg.contains("without BPF support"));
         assert!(msg.contains("--features bpf"));
+    }
+
+    #[test]
+    fn record_error_display_not_yet_wired() {
+        let err = RecordError::NotYetWired;
+        let msg = format!("{err}");
+        assert!(msg.contains("not yet wired"));
+        assert!(msg.contains("skeleton"));
     }
 
     #[test]
@@ -193,6 +167,9 @@ mod tests {
         let err = RecordError::NoBpfSupport;
         assert!(std::error::Error::source(&err).is_none());
 
+        let err = RecordError::NotYetWired;
+        assert!(std::error::Error::source(&err).is_none());
+
         let err = RecordError::SignalSetup(io::Error::other("x"));
         assert!(std::error::Error::source(&err).is_some());
 
@@ -208,34 +185,23 @@ mod tests {
             duration: None,
             buffer_size: None,
         };
-        let running = Arc::new(AtomicBool::new(true));
-        let result = record_impl(&args, &running);
+        let stop_requested = Arc::new(AtomicBool::new(false));
+        let result = record_impl(&args, &stop_requested);
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(matches!(err, RecordError::NoBpfSupport));
+        assert!(matches!(result.unwrap_err(), RecordError::NoBpfSupport));
     }
 
     #[cfg(feature = "bpf")]
     #[test]
-    fn record_with_duration_produces_valid_file() {
-        let dir = std::env::temp_dir().join("wperf-test-record");
-        std::fs::create_dir_all(&dir).unwrap();
-        let output = dir.join("test-record.wperf");
-
+    fn record_bpf_returns_not_yet_wired() {
         let args = RecordArgs {
-            output: output.clone(),
-            duration: Some(0.2), // 200ms — just enough to exercise the loop
+            output: PathBuf::from("/tmp/test.wperf"),
+            duration: None,
             buffer_size: None,
         };
-        let running = Arc::new(AtomicBool::new(true));
-        record_impl(&args, &running).unwrap();
-
-        // Verify the file is a valid .wperf with header.
-        let data = std::fs::read(&output).unwrap();
-        assert!(data.len() >= 64); // At least header
-        assert_eq!(&data[0..4], b"wPRF");
-
-        // Cleanup.
-        let _ = std::fs::remove_dir_all(&dir);
+        let stop_requested = Arc::new(AtomicBool::new(false));
+        let result = record_impl(&args, &stop_requested);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RecordError::NotYetWired));
     }
 }
