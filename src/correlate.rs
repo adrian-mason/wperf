@@ -140,10 +140,10 @@ fn handle_switch(
     if let Some(record) = off_cpu.remove(&event.next_tid) {
         if let Some(waker_tid) = record.waker_tid {
             // We have a complete causal chain: switch-out → wakeup → switch-in.
-            // Derive both endpoints directly from event timestamps to avoid
-            // truncation drift (see Gemini review on independent floor ops).
-            let start_ms = record.switch_out_ns / 1_000_000;
-            let end_ms = event.timestamp_ns / 1_000_000;
+            // Use floor(delta_ns / 1e6) for duration to preserve raw_wait_ms
+            // accuracy. Independent endpoint truncation would inflate wait
+            // times (e.g. 1.2ms → 2ms). See team review discussion on #92.
+            let off_cpu_ms = event.timestamp_ns.saturating_sub(record.switch_out_ns) / 1_000_000;
 
             // Ensure both nodes exist.
             let src = ThreadId(i64::from(event.next_tid));
@@ -151,7 +151,8 @@ fn handle_switch(
             graph.add_node(src, NodeKind::UserThread);
             graph.add_node(dst, NodeKind::UserThread);
 
-            graph.add_edge(src, dst, TimeWindow::new(start_ms, end_ms.max(start_ms)));
+            let start_ms = record.switch_out_ns / 1_000_000;
+            graph.add_edge(src, dst, TimeWindow::new(start_ms, start_ms + off_cpu_ms));
 
             stats.edges_created += 1;
         } else {
@@ -466,9 +467,9 @@ mod tests {
         assert_eq!(stats.edges_created, 1);
         let edges = graph.all_edges();
         let ew = edges[0].3;
-        // start = 1_500_000 / 1M = 1, end = 10_200_000 / 1M = 10
-        assert_eq!(ew.time_window.start_ms, 1);
-        assert_eq!(ew.time_window.end_ms, 10);
-        assert_eq!(ew.raw_wait_ms, 9); // 10 - 1
+        // 10_200_000 - 1_500_000 = 8_700_000 ns → floor(8.7ms) = 8ms
+        assert_eq!(ew.raw_wait_ms, 8);
+        assert_eq!(ew.time_window.start_ms, 1); // 1_500_000 / 1M = 1
+        assert_eq!(ew.time_window.end_ms, 9); // 1 + 8 = 9
     }
 }
