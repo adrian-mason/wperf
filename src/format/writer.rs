@@ -14,13 +14,13 @@ use super::event::{EVENT_SIZE, WperfEvent};
 use super::header::WprfHeader;
 
 /// TLV record type for scheduling events.
-const REC_TYPE_SCHED_EVENT: u8 = 1;
+pub const REC_TYPE_SCHED_EVENT: u8 = 1;
 
 /// TLV record header size: 1 byte type + 4 bytes length.
-const TLV_HEADER_SIZE: usize = 5;
+pub const TLV_HEADER_SIZE: usize = 5;
 
 /// Footer section IDs (per final-design.md §4.3).
-const SECTION_ID_METADATA: u32 = 3;
+pub const SECTION_ID_METADATA: u32 = 3;
 
 /// Footer section entry size: `section_id(u32)` + offset(u64) + size(u64) = 20 bytes.
 const SECTION_ENTRY_SIZE: usize = 20;

@@ -19,7 +19,7 @@ use std::io::{self, Read, Seek, SeekFrom};
 
 use super::event::{EVENT_SIZE, WperfEvent};
 use super::header::{HeaderError, WprfHeader};
-use super::writer::{self, MAX_PAYLOAD_SIZE};
+use super::writer::{self, MAX_PAYLOAD_SIZE, REC_TYPE_SCHED_EVENT, SECTION_ID_METADATA, TLV_HEADER_SIZE};
 
 /// Errors when reading a .wperf file.
 #[derive(Debug)]
@@ -145,8 +145,8 @@ impl<R: Read + Seek> WperfReader<R> {
                 return Ok(None);
             }
 
-            // Check if there's enough room for at least a TLV header (5 bytes)
-            if pos + 5 > self.data_end {
+            // Check if there's enough room for at least a TLV header
+            if pos + TLV_HEADER_SIZE as u64 > self.data_end {
                 return Ok(None);
             }
 
@@ -164,9 +164,8 @@ impl<R: Read + Seek> WperfReader<R> {
                 return Ok(None);
             }
 
-            // Record type 1 = sched event
             #[allow(clippy::cast_possible_truncation)] // EVENT_SIZE is 40, always fits u32
-            if rec_type == 1 {
+            if rec_type == REC_TYPE_SCHED_EVENT {
                 if length != EVENT_SIZE as u32 {
                     return Err(ReaderError::UnexpectedPayloadSize {
                         rec_type,
@@ -217,10 +216,10 @@ impl<R: Read + Seek> WperfReader<R> {
         loop {
             match writer::read_section_entry(&mut self.inner) {
                 Ok((section_id, offset, size)) => {
-                    // SECTION_ID_METADATA = 3
-                    if section_id == 3 {
+                    if section_id == SECTION_ID_METADATA {
                         metadata_offset = Some(offset);
                         metadata_size = Some(size);
+                        break;
                     }
                 }
                 Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
@@ -235,9 +234,16 @@ impl<R: Read + Seek> WperfReader<R> {
             });
         };
 
-        // Read metadata payload
+        // Read metadata payload (with OOM protection)
+        #[allow(clippy::cast_possible_truncation)] // SECTION_ID_METADATA fits u8; size is bounded
+        if size > u64::from(MAX_PAYLOAD_SIZE) {
+            return Err(ReaderError::PayloadTooLarge {
+                rec_type: SECTION_ID_METADATA as u8,
+                length: size.min(u64::from(u32::MAX)) as u32,
+            });
+        }
         self.inner.seek(SeekFrom::Start(offset))?;
-        #[allow(clippy::cast_possible_truncation)] // metadata sections are small
+        #[allow(clippy::cast_possible_truncation)] // bounded by MAX_PAYLOAD_SIZE check above
         let mut buf = vec![0u8; size as usize];
         self.inner.read_exact(&mut buf)?;
 
