@@ -6,11 +6,11 @@
      List each by name/number. Example:
        - ADR-002-supplement §3 (compat.bpf.h vendor pattern)
        - final-design.md §4.1 (wPRF header layout)
-     If none apply, write: N/A (no governing spec) -->
+     If none apply, write: None (no governing spec) -->
 
 ## Deviations
 <!-- Does this PR deviate from any accepted design or ADR?
-     Only two valid states:
+     Valid entries:
        - None
        - Deviation: <description> — doc update: <PR or commit ref>
      A deviation WITHOUT a prior or concurrent spec amendment is a process violation. -->
@@ -22,7 +22,7 @@
 - [ ] If introducing a new Cargo feature, CI validates both default and feature-on builds
 
 ## Review Checklist
-<!-- For reviewers — check these IN ORDER before evaluating code correctness -->
+<!-- For reviewers — check these items in order, prioritizing design conformance -->
 - [ ] **Design conformance**: implementation matches the ADRs/specs listed in Authoritative Inputs
 - [ ] **Deviations declared**: any spec drift is explicitly listed above with a doc update reference
 - [ ] **Code correctness**: logic, error handling, edge cases
