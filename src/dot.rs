@@ -41,10 +41,10 @@ pub fn render_dot(cascade: &CascadeResult) -> String {
         .unwrap();
     }
 
-    // Emit edges sorted by (src, dst) for determinism. Stable sort preserves
-    // upstream `CascadeResult` ordering for edges with the same (src, dst).
+    // Emit edges sorted by full key for determinism — includes label fields
+    // so output is self-contained and doesn't depend on upstream edge order.
     let mut edges: Vec<&EdgeOutput> = cascade.edges.iter().collect();
-    edges.sort_by_key(|e| (e.src, e.dst));
+    edges.sort_unstable_by_key(|e| (e.src, e.dst, e.attributed_delay_ms, e.raw_wait_ms));
 
     for edge in edges {
         writeln!(
@@ -178,5 +178,31 @@ mod tests {
         let edge_100_200 = dot1.find("t100 -> t200").unwrap();
         let edge_300_100 = dot1.find("t300 -> t100").unwrap();
         assert!(edge_100_200 < edge_300_100);
+    }
+
+    #[test]
+    fn duplicate_src_dst_deterministic() {
+        // Two edges with same (src, dst) but different weights must have
+        // deterministic ordering based on label fields.
+        let cascade = make_cascade(vec![
+            EdgeOutput {
+                src: ThreadId(100),
+                dst: ThreadId(200),
+                raw_wait_ms: 10,
+                attributed_delay_ms: 8,
+            },
+            EdgeOutput {
+                src: ThreadId(100),
+                dst: ThreadId(200),
+                raw_wait_ms: 5,
+                attributed_delay_ms: 3,
+            },
+        ]);
+        let dot = render_dot(&cascade);
+
+        // Smaller attributed_delay_ms (3) must appear before larger (8).
+        let pos_3ms = dot.find("label=\"3ms (raw 5ms)\"").unwrap();
+        let pos_8ms = dot.find("label=\"8ms (raw 10ms)\"").unwrap();
+        assert!(pos_3ms < pos_8ms);
     }
 }
