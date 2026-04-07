@@ -15,6 +15,7 @@ use serde::Serialize;
 use crate::cascade::engine::{self, InvariantError};
 use crate::cli::{ReportArgs, ReportFormat};
 use crate::critical_path::{self, CriticalPath};
+use crate::dot;
 use crate::format::reader::{ReaderError, WperfReader};
 use crate::output::CascadeResult;
 use crate::pipeline::{self, PipelineError, PipelineStats};
@@ -115,6 +116,13 @@ pub fn run(args: &ReportArgs) -> Result<(), ReportError> {
             let mut writer = BufWriter::new(stdout);
             serde_json::to_writer_pretty(&mut writer, &report)
                 .map_err(|e| ReportError::Io(e.into()))?;
+            writer.flush()?;
+        }
+        ReportFormat::Dot => {
+            let stdout = std::io::stdout().lock();
+            let mut writer = BufWriter::new(stdout);
+            let dot_output = dot::render_dot(&report.cascade);
+            writer.write_all(dot_output.as_bytes())?;
             writer.flush()?;
         }
     }

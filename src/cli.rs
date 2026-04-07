@@ -61,6 +61,7 @@ pub struct ReportArgs {
 #[derive(clap::ValueEnum, Clone, Debug)]
 pub enum ReportFormat {
     Json,
+    Dot,
 }
 
 /// Parse a positive duration value (rejects zero and negative).

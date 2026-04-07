@@ -1,0 +1,8 @@
+---
+source: tests/snapshot_tests.rs
+expression: dot_output
+---
+digraph wperf {
+    rankdir=LR;
+    node [shape=box];
+}
