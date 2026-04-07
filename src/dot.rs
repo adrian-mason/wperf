@@ -6,6 +6,7 @@
 
 use std::fmt::Write;
 
+use crate::graph::types::ThreadId;
 use crate::output::{CascadeResult, EdgeOutput};
 
 /// Render a `CascadeResult` as a Graphviz DOT digraph.
@@ -30,15 +31,10 @@ pub fn render_dot(cascade: &CascadeResult) -> String {
     }
     nodes.sort_unstable();
 
-    // Emit nodes.
+    // Emit nodes. Labels use ThreadId::Display for human-readable names
+    // (e.g. "NIC", "Disk" for pseudo-threads, "T101" for regular threads).
     for tid in &nodes {
-        writeln!(
-            out,
-            "    {} [label=\"T{}\"];",
-            dot_id(*tid),
-            dot_escape_label(*tid)
-        )
-        .unwrap();
+        writeln!(out, "    {} [label=\"{}\"];", dot_id(*tid), ThreadId(*tid)).unwrap();
     }
 
     // Emit edges sorted by full key for determinism — includes label fields
@@ -72,11 +68,6 @@ fn dot_id(tid: i64) -> String {
     } else {
         format!("t{tid}")
     }
-}
-
-/// Produce a DOT-safe label string for a thread id.
-fn dot_escape_label(tid: i64) -> String {
-    format!("{tid}")
 }
 
 #[cfg(test)]
@@ -142,7 +133,7 @@ mod tests {
             attributed_delay_ms: 8,
         }]);
         let dot = render_dot(&cascade);
-        assert!(dot.contains("neg_4 [label=\"T-4\"]"));
+        assert!(dot.contains("neg_4 [label=\"NIC\"]"));
         assert!(dot.contains("neg_4 -> t100"));
     }
 
