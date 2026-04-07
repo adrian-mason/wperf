@@ -13,7 +13,7 @@ use std::io::{BufWriter, Read, Seek};
 use serde::Serialize;
 
 use crate::cascade::engine::{self, InvariantError};
-use crate::cli::ReportArgs;
+use crate::cli::{ReportArgs, ReportFormat};
 use crate::critical_path::{self, CriticalPath};
 use crate::format::reader::{ReaderError, WperfReader};
 use crate::output::CascadeResult;
@@ -92,7 +92,7 @@ pub struct HealthMetrics {
     pub false_wakeup_filtered_count: Option<u64>,
 }
 
-/// CLI entry point: opens the file, runs the pipeline, writes JSON to stdout.
+/// CLI entry point: opens the file, runs the pipeline, writes output to stdout.
 pub fn run(args: &ReportArgs) -> Result<(), ReportError> {
     let file = File::open(&args.input)?;
     let mut reader = WperfReader::open(file).map_err(|e| match e {
@@ -100,9 +100,14 @@ pub fn run(args: &ReportArgs) -> Result<(), ReportError> {
         other => ReportError::Pipeline(PipelineError::Reader(other)),
     })?;
     let report = build_report(&mut reader)?;
-    let stdout = std::io::stdout().lock();
-    let writer = BufWriter::new(stdout);
-    serde_json::to_writer_pretty(writer, &report).map_err(|e| ReportError::Io(e.into()))?;
+
+    match args.format {
+        ReportFormat::Json => {
+            let stdout = std::io::stdout().lock();
+            let writer = BufWriter::new(stdout);
+            serde_json::to_writer_pretty(writer, &report).map_err(|e| ReportError::Io(e.into()))?;
+        }
+    }
     Ok(())
 }
 
@@ -113,9 +118,11 @@ pub fn build_report<R: Read + Seek>(
     // Step 1-3: parse + sort + correlate
     let (wfg, stats) = pipeline::build_wait_for_graph(reader)?;
 
-    // Read footer metadata for drop_count
-    let metadata = reader.read_metadata().ok();
-    let drop_count = metadata.and_then(|m| m.drop_count);
+    // Read footer metadata for drop_count — propagate real errors (malformed
+    // footer, oversized payload, I/O). Crash-recovery (no footer) is already
+    // expressed as Ok(Metadata { drop_count: None, .. }) by the reader.
+    let metadata = reader.read_metadata().map_err(PipelineError::Reader)?;
+    let drop_count = metadata.drop_count;
 
     // Step 4: cascade redistribution
     let cascaded = engine::cascade_engine(&wfg, None)?;
@@ -265,6 +272,30 @@ mod tests {
         assert!(json["stats"]["events_read"].is_number());
         assert_eq!(json["health"]["drop_count"], 5);
         assert!(json["health"]["partial_stack_count"].is_null());
+    }
+
+    #[test]
+    fn corrupted_metadata_propagates_error() {
+        // Write a valid trace, then corrupt the section table so the metadata
+        // size exceeds MAX_PAYLOAD_SIZE — build_report must return an error,
+        // not silently produce drop_count: null.
+        let mut cursor = Cursor::new(Vec::new());
+        let writer = WperfWriter::new(&mut cursor).unwrap();
+        writer.finish(0).unwrap();
+        let mut buf = cursor.into_inner();
+
+        // The section table entry is at header.section_table_offset.
+        // Entry layout: section_id(4) + offset(8) + size(8) = 20 bytes.
+        // Corrupt the size field (bytes 12..20 of the entry) to exceed MAX_PAYLOAD_SIZE.
+        #[allow(clippy::cast_possible_truncation)] // test-only, file is tiny
+        let st_offset = u64::from_le_bytes(buf[16..24].try_into().unwrap()) as usize;
+        let size_field_offset = st_offset + 12; // skip section_id(4) + offset(8)
+        let bad_size: u64 = (16 * 1024 * 1024) + 1; // MAX_PAYLOAD_SIZE + 1
+        buf[size_field_offset..size_field_offset + 8].copy_from_slice(&bad_size.to_le_bytes());
+
+        let mut reader = WperfReader::open(Cursor::new(buf)).unwrap();
+        let result = build_report(&mut reader);
+        assert!(result.is_err(), "corrupted metadata must propagate error");
     }
 
     #[test]
