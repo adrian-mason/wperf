@@ -181,6 +181,11 @@ fn handle_wakeup(
     let target = event.next_tid;
     let source = event.prev_tid;
 
+    // Skip idle thread as waker — kernel context, not a real causal source.
+    if source == 0 {
+        return;
+    }
+
     if let Some(record) = off_cpu.get_mut(&target) {
         // Last-wake-wins: overwrite any previous waker.
         record.waker_tid = Some(source);
@@ -419,6 +424,23 @@ mod tests {
 
         assert_eq!(stats.edges_created, 0);
         assert_eq!(graph.node_count(), 0);
+    }
+
+    #[test]
+    fn wakeup_from_idle_ignored() {
+        // Wakeup with source=0 (idle/kernel context) should not record a waker.
+        // The thread should switch-in without a waker, not create an edge to tid 0.
+        let events = vec![
+            switch_event(1_000_000, 100, 200, 1), // T100 off-CPU
+            wakeup_event(2_000_000, 0, 100),      // idle "wakes" T100 (ignored)
+            switch_event(3_000_000, 200, 100, 0), // T100 on-CPU
+        ];
+
+        let (graph, stats) = correlate_events(&events);
+
+        assert_eq!(stats.edges_created, 0);
+        assert_eq!(stats.switch_in_without_waker_count, 1);
+        assert_eq!(graph.node_count(), 0); // no tid 0 node
     }
 
     #[test]
