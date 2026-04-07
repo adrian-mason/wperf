@@ -5,14 +5,17 @@
 
 use petgraph::graph::NodeIndex;
 
+use serde::Serialize;
+
 use crate::graph::types::{NodeKind, ThreadId};
 use crate::graph::wfg::WaitForGraph;
 
 use super::tarjan::CondensationDag;
 
 /// A detected Knot — a sink SCC that passes business filters.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Knot {
+    #[serde(skip)]
     pub dag_index: NodeIndex,
     pub members: Vec<ThreadId>,
 }

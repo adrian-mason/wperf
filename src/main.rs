@@ -6,12 +6,9 @@ use wperf::cli::{Cli, Command};
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    let result = match cli.command {
-        Command::Record(args) => wperf::record::run(&args),
-        Command::Report(_args) => {
-            eprintln!("wperf report: not yet implemented (planned for W3 #17)");
-            return ExitCode::FAILURE;
-        }
+    let result: Result<(), Box<dyn std::error::Error>> = match cli.command {
+        Command::Record(args) => wperf::record::run(&args).map_err(Into::into),
+        Command::Report(args) => wperf::report::run(&args).map_err(Into::into),
         Command::Version => {
             println!("wperf {}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;

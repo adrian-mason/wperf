@@ -26,6 +26,8 @@
 
 use std::collections::HashMap;
 
+use serde::Serialize;
+
 use crate::format::event::{EventType, WperfEvent};
 use crate::graph::types::{NodeKind, ThreadId, TimeWindow};
 use crate::graph::wfg::WaitForGraph;
@@ -51,7 +53,7 @@ struct OffCpuRecord {
 ///   `final-design.md §3.2 / §3.8`. It measures correlation completeness.
 /// - All other counters are **internal diagnostic stats** for debugging and
 ///   are not part of the exported observability contract.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct CorrelationStats {
     /// Total events processed.
     pub events_processed: u64,
