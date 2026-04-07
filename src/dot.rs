@@ -41,9 +41,10 @@ pub fn render_dot(cascade: &CascadeResult) -> String {
         .unwrap();
     }
 
-    // Emit edges sorted by (src, dst) for determinism.
+    // Emit edges sorted by (src, dst) for determinism. Stable sort preserves
+    // upstream `CascadeResult` ordering for edges with the same (src, dst).
     let mut edges: Vec<&EdgeOutput> = cascade.edges.iter().collect();
-    edges.sort_unstable_by_key(|e| (e.src, e.dst));
+    edges.sort_by_key(|e| (e.src, e.dst));
 
     for edge in edges {
         writeln!(
