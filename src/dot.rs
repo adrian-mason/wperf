@@ -20,16 +20,13 @@ pub fn render_dot(cascade: &CascadeResult) -> String {
     writeln!(out, "    node [shape=box];").unwrap();
 
     // Collect and sort unique node ids for deterministic output.
-    let mut nodes: Vec<i64> = Vec::new();
-    for edge in &cascade.edges {
-        if !nodes.contains(&edge.src.0) {
-            nodes.push(edge.src.0);
-        }
-        if !nodes.contains(&edge.dst.0) {
-            nodes.push(edge.dst.0);
-        }
-    }
+    let mut nodes: Vec<i64> = cascade
+        .edges
+        .iter()
+        .flat_map(|e| [e.src.0, e.dst.0])
+        .collect();
     nodes.sort_unstable();
+    nodes.dedup();
 
     // Emit nodes. Labels use ThreadId::Display for human-readable names
     // (e.g. "NIC", "Disk" for pseudo-threads, "T101" for regular threads).
@@ -78,15 +75,9 @@ mod tests {
 
     fn make_cascade(edges: Vec<EdgeOutput>) -> CascadeResult {
         let edge_count = edges.len();
-        let mut node_ids: Vec<i64> = Vec::new();
-        for e in &edges {
-            if !node_ids.contains(&e.src.0) {
-                node_ids.push(e.src.0);
-            }
-            if !node_ids.contains(&e.dst.0) {
-                node_ids.push(e.dst.0);
-            }
-        }
+        let mut node_ids: Vec<i64> = edges.iter().flat_map(|e| [e.src.0, e.dst.0]).collect();
+        node_ids.sort_unstable();
+        node_ids.dedup();
         CascadeResult {
             edges,
             graph_metrics: GraphMetrics {
