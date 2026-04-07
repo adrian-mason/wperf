@@ -1,7 +1,10 @@
-//! Snapshot tests for `.wperf` parser output using `insta`.
+//! Snapshot tests for `.wperf` parser output and JSON report output.
 //!
-//! Covers reader round-trip parsing: events, metadata, headers, and error
-//! display strings. JSON/report snapshots are deferred to W3 #21.
+//! Parser snapshots (W2 #14): reader round-trip parsing of events, metadata,
+//! headers, and error display strings.
+//!
+//! Report snapshots (W3 #21): JSON report output from `build_report()` pure
+//! seam, covering schema shape and health metrics contract.
 
 use std::io::Cursor;
 
@@ -9,6 +12,7 @@ use wperf::format::event::{EventType, WperfEvent};
 use wperf::format::header::HEADER_SIZE;
 use wperf::format::reader::{ReaderError, WperfReader};
 use wperf::format::writer::WperfWriter;
+use wperf::report;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -208,4 +212,56 @@ fn snapshot_error_unexpected_payload_size() {
 fn snapshot_error_unknown_record_type() {
     let err = ReaderError::UnknownRecordType(255);
     insta::assert_snapshot!("error_unknown_record_type", format!("{err}"));
+}
+
+// ---------------------------------------------------------------------------
+// JSON report output snapshots (W3 #21)
+// ---------------------------------------------------------------------------
+
+/// Helper: write events → open reader → `build_report()`.
+fn build_test_report(events: &[WperfEvent], drop_count: u64) -> report::ReportOutput {
+    let mut reader = write_and_open(events, drop_count);
+    report::build_report(&mut reader).unwrap()
+}
+
+#[test]
+fn snapshot_empty_trace_report() {
+    let report = build_test_report(&[], 0);
+    let json = serde_json::to_value(&report).unwrap();
+    insta::assert_yaml_snapshot!(json);
+}
+
+#[test]
+fn snapshot_single_edge_report() {
+    // 1 matched wait edge: T101 goes off-CPU, T201 wakes T101, T101 back on.
+    let events = vec![
+        switch_event(1_000_000, 101, 202),
+        wakeup_event(2_000_000, 201, 101),
+        switch_event(3_000_000, 202, 101),
+    ];
+    let report = build_test_report(&events, 5);
+    let json = serde_json::to_value(&report).unwrap();
+    insta::assert_yaml_snapshot!(json);
+}
+
+#[test]
+fn snapshot_unmatched_wakeup_report() {
+    // Wakeup with no matching off-CPU switch → unmatched_wakeup_count > 0.
+    let events = vec![wakeup_event(1_000_000, 201, 101)];
+    let report = build_test_report(&events, 0);
+    let json = serde_json::to_value(&report).unwrap();
+    insta::assert_yaml_snapshot!(json);
+}
+
+#[test]
+fn snapshot_health_metrics_schema() {
+    // Verifies all 6 health fields: 3 actual + 3 null (unavailable in Phase 1).
+    let events = vec![
+        switch_event(1_000_000, 101, 202),
+        wakeup_event(2_000_000, 201, 101),
+        switch_event(3_000_000, 202, 101),
+    ];
+    let report = build_test_report(&events, 7);
+    let health_json = serde_json::to_value(&report.health).unwrap();
+    insta::assert_yaml_snapshot!(health_json);
 }

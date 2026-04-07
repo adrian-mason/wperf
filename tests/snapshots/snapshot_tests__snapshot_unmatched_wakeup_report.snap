@@ -1,0 +1,29 @@
+---
+source: tests/snapshot_tests.rs
+expression: json
+---
+cascade:
+  edges: []
+  graph_metrics:
+    edge_count: 0
+    invariants_ok: true
+    node_count: 0
+    total_attributed_delay_ms: 0
+    total_raw_wait_ms: 0
+critical_path: ~
+health:
+  cascade_depth_truncation_count: ~
+  drop_count: 0
+  false_wakeup_filtered_count: ~
+  invariants_ok: true
+  partial_stack_count: ~
+  unmatched_wakeup_count: 1
+knots: []
+stats:
+  correlation:
+    edges_created: 0
+    events_processed: 1
+    switch_in_without_waker_count: 0
+    unmatched_switch_in_count: 0
+    unmatched_wakeup_count: 1
+  events_read: 1

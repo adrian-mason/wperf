@@ -1,0 +1,41 @@
+---
+source: tests/snapshot_tests.rs
+expression: json
+---
+cascade:
+  edges:
+    - attributed_delay_ms: 2
+      dst: 201
+      raw_wait_ms: 2
+      src: 101
+  graph_metrics:
+    edge_count: 1
+    invariants_ok: true
+    node_count: 2
+    total_attributed_delay_ms: 2
+    total_raw_wait_ms: 2
+critical_path:
+  chain:
+    - members:
+        - 101
+      weight: 2
+    - members:
+        - 201
+      weight: 2
+  total_weight: 6
+health:
+  cascade_depth_truncation_count: ~
+  drop_count: 5
+  false_wakeup_filtered_count: ~
+  invariants_ok: true
+  partial_stack_count: ~
+  unmatched_wakeup_count: 0
+knots: []
+stats:
+  correlation:
+    edges_created: 1
+    events_processed: 3
+    switch_in_without_waker_count: 0
+    unmatched_switch_in_count: 1
+    unmatched_wakeup_count: 0
+  events_read: 3
