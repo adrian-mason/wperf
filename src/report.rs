@@ -8,7 +8,7 @@
 //! See plan v2 for the explicit JSON field inventory and deferred fields.
 
 use std::fs::File;
-use std::io::{BufWriter, Read, Seek};
+use std::io::{BufWriter, Read, Seek, Write};
 
 use serde::Serialize;
 
@@ -104,8 +104,10 @@ pub fn run(args: &ReportArgs) -> Result<(), ReportError> {
     match args.format {
         ReportFormat::Json => {
             let stdout = std::io::stdout().lock();
-            let writer = BufWriter::new(stdout);
-            serde_json::to_writer_pretty(writer, &report).map_err(|e| ReportError::Io(e.into()))?;
+            let mut writer = BufWriter::new(stdout);
+            serde_json::to_writer_pretty(&mut writer, &report)
+                .map_err(|e| ReportError::Io(e.into()))?;
+            writer.flush()?;
         }
     }
     Ok(())
