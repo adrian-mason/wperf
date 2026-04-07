@@ -1,0 +1,12 @@
+---
+source: tests/snapshot_tests.rs
+expression: metadata
+---
+Metadata {
+    event_count: Some(
+        0,
+    ),
+    drop_count: Some(
+        0,
+    ),
+}

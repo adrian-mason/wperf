@@ -1,0 +1,58 @@
+---
+source: tests/snapshot_tests.rs
+expression: parsed
+---
+[
+    WperfEvent {
+        timestamp_ns: 1000000,
+        pid: 100,
+        tid: 101,
+        prev_tid: 101,
+        next_tid: 202,
+        prev_pid: 100,
+        next_pid: 200,
+        cpu: 0,
+        event_type: 1,
+        prev_state: 1,
+        flags: 0,
+    },
+    WperfEvent {
+        timestamp_ns: 2000000,
+        pid: 200,
+        tid: 201,
+        prev_tid: 201,
+        next_tid: 101,
+        prev_pid: 200,
+        next_pid: 100,
+        cpu: 2,
+        event_type: 2,
+        prev_state: 0,
+        flags: 0,
+    },
+    WperfEvent {
+        timestamp_ns: 3000000,
+        pid: 100,
+        tid: 101,
+        prev_tid: 202,
+        next_tid: 101,
+        prev_pid: 100,
+        next_pid: 200,
+        cpu: 0,
+        event_type: 1,
+        prev_state: 1,
+        flags: 0,
+    },
+    WperfEvent {
+        timestamp_ns: 4000000,
+        pid: 100,
+        tid: 202,
+        prev_tid: 202,
+        next_tid: 0,
+        prev_pid: 100,
+        next_pid: 0,
+        cpu: 0,
+        event_type: 4,
+        prev_state: 0,
+        flags: 0,
+    },
+]

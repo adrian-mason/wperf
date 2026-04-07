@@ -1,0 +1,19 @@
+---
+source: tests/snapshot_tests.rs
+expression: parsed
+---
+[
+    WperfEvent {
+        timestamp_ns: 2000000,
+        pid: 200,
+        tid: 201,
+        prev_tid: 201,
+        next_tid: 101,
+        prev_pid: 200,
+        next_pid: 100,
+        cpu: 2,
+        event_type: 2,
+        prev_state: 0,
+        flags: 0,
+    },
+]
