@@ -1,0 +1,5 @@
+---
+source: tests/snapshot_tests.rs
+expression: "format!(\"{err}\")"
+---
+unknown TLV record type: 255

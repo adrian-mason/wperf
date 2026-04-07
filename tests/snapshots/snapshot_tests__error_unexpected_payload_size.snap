@@ -1,0 +1,5 @@
+---
+source: tests/snapshot_tests.rs
+expression: "format!(\"{err}\")"
+---
+unexpected payload size for type 1: expected 40, got 30
