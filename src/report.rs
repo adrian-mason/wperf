@@ -80,15 +80,23 @@ pub struct ReportOutput {
 
 /// Coverage and health metrics (§5.5).
 ///
-/// Fields that lack plumbing in Phase 1 are `None` (serialized as `null`).
+/// Actual metrics are wired from the pipeline; fields that lack plumbing
+/// in Phase 1 are `None` (serialized as `null`, meaning "not yet measured").
 #[derive(Debug, Serialize)]
 pub struct HealthMetrics {
+    /// Structural postcondition guard (I-2 ∧ I-7). `false` means cascade
+    /// engine violation — results should not be trusted.
+    pub invariants_ok: bool,
+    /// BPF-side event drops (ringbuf reserve failures / perfarray overflows).
     pub drop_count: Option<u64>,
-    /// Deferred: no stack capture in Phase 1.
+    /// Wakeup events with no matching off-CPU switch — measures correlation
+    /// completeness.
+    pub unmatched_wakeup_count: u64,
+    /// Unavailable: no stack capture in Phase 1.
     pub partial_stack_count: Option<u64>,
-    /// Deferred: cascade engine does not yet track depth truncations.
+    /// Unavailable: cascade engine depth limit exists but is not instrumented.
     pub cascade_depth_truncation_count: Option<u64>,
-    /// Deferred: no false-wakeup filter in Phase 1.
+    /// Unavailable: no false-wakeup filter in Phase 1.
     pub false_wakeup_filtered_count: Option<u64>,
 }
 
@@ -140,13 +148,18 @@ pub fn build_report<R: Read + Seek>(
     // Knot detection
     let knots = knot::detect_knots(&cdag, &cascaded);
 
+    let invariants_ok = cascade.graph_metrics.invariants_ok;
+    let unmatched_wakeup_count = stats.correlation.unmatched_wakeup_count;
+
     Ok(ReportOutput {
         cascade,
         critical_path,
         knots,
         stats,
         health: HealthMetrics {
+            invariants_ok,
             drop_count,
+            unmatched_wakeup_count,
             partial_stack_count: None,
             cascade_depth_truncation_count: None,
             false_wakeup_filtered_count: None,
@@ -248,10 +261,37 @@ mod tests {
     }
 
     #[test]
-    fn deferred_health_fields_are_null() {
+    fn health_metrics_actual_values() {
+        let events = vec![
+            switch_event(1_000_000, 100, 200, 1),
+            wakeup_event(2_000_000, 200, 100),
+            switch_event(3_000_000, 200, 100, 0),
+        ];
+        let mut reader = write_and_read(&events, 7);
+        let report = build_report(&mut reader).unwrap();
+
+        // Actual metrics — wired from pipeline
+        assert!(report.health.invariants_ok);
+        assert_eq!(report.health.drop_count, Some(7));
+        assert_eq!(report.health.unmatched_wakeup_count, 0);
+    }
+
+    #[test]
+    fn health_metrics_unmatched_wakeup() {
+        // Wakeup with no matching off-CPU switch → unmatched
+        let events = vec![wakeup_event(1_000_000, 200, 100)];
+        let mut reader = write_and_read(&events, 0);
+        let report = build_report(&mut reader).unwrap();
+
+        assert_eq!(report.health.unmatched_wakeup_count, 1);
+    }
+
+    #[test]
+    fn health_metrics_unavailable_are_null() {
         let mut reader = write_and_read(&[], 0);
         let report = build_report(&mut reader).unwrap();
 
+        // Unavailable metrics — not yet measured, serialized as null
         assert!(report.health.partial_stack_count.is_none());
         assert!(report.health.cascade_depth_truncation_count.is_none());
         assert!(report.health.false_wakeup_filtered_count.is_none());
@@ -272,8 +312,16 @@ mod tests {
         assert!(json["cascade"]["graph_metrics"]["invariants_ok"].is_boolean());
         assert!(json["critical_path"].is_object() || json["critical_path"].is_null());
         assert!(json["stats"]["events_read"].is_number());
+
+        // Actual health metrics in JSON
+        assert_eq!(json["health"]["invariants_ok"], true);
         assert_eq!(json["health"]["drop_count"], 5);
+        assert_eq!(json["health"]["unmatched_wakeup_count"], 0);
+
+        // Unavailable metrics are null in JSON
         assert!(json["health"]["partial_stack_count"].is_null());
+        assert!(json["health"]["cascade_depth_truncation_count"].is_null());
+        assert!(json["health"]["false_wakeup_filtered_count"].is_null());
     }
 
     #[test]
