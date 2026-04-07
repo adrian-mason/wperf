@@ -5,6 +5,7 @@ pub mod critical_path;
 pub mod format;
 pub mod graph;
 pub mod output;
+pub mod pipeline;
 pub mod probe;
 pub mod record;
 pub mod scc;
