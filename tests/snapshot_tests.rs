@@ -1,13 +1,16 @@
-//! Snapshot tests for `.wperf` parser output and JSON report output.
+//! Snapshot tests for `.wperf` parser output, JSON report output, and DOT output.
 //!
 //! Parser snapshots (W2 #14): reader round-trip parsing of events, metadata,
 //! headers, and error display strings.
 //!
 //! Report snapshots (W3 #21): JSON report output from `build_report()` pure
 //! seam, covering schema shape and health metrics contract.
+//!
+//! DOT snapshots (W3 #19): Graphviz DOT text output from `render_dot()`.
 
 use std::io::Cursor;
 
+use wperf::dot;
 use wperf::format::event::{EventType, WperfEvent};
 use wperf::format::header::HEADER_SIZE;
 use wperf::format::reader::{ReaderError, WperfReader};
@@ -264,4 +267,43 @@ fn snapshot_health_metrics_schema() {
     let report = build_test_report(&events, 7);
     let health_json = serde_json::to_value(&report.health).unwrap();
     insta::assert_yaml_snapshot!(health_json);
+}
+
+// ---------------------------------------------------------------------------
+// DOT output snapshots (W3 #19)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn snapshot_dot_empty_graph() {
+    let report = build_test_report(&[], 0);
+    let dot_output = dot::render_dot(&report.cascade);
+    insta::assert_snapshot!(dot_output);
+}
+
+#[test]
+fn snapshot_dot_single_edge() {
+    let events = vec![
+        switch_event(1_000_000, 101, 202),
+        wakeup_event(2_000_000, 201, 101),
+        switch_event(3_000_000, 202, 101),
+    ];
+    let report = build_test_report(&events, 0);
+    let dot_output = dot::render_dot(&report.cascade);
+    insta::assert_snapshot!(dot_output);
+}
+
+#[test]
+fn snapshot_dot_multi_edge() {
+    // T101 waits on T201, T201 waits on T301 — two edges.
+    let events = vec![
+        switch_event(1_000_000, 101, 202),
+        switch_event(1_500_000, 201, 302),
+        wakeup_event(2_000_000, 301, 201),
+        switch_event(2_500_000, 302, 201),
+        wakeup_event(3_000_000, 201, 101),
+        switch_event(3_500_000, 202, 101),
+    ];
+    let report = build_test_report(&events, 0);
+    let dot_output = dot::render_dot(&report.cascade);
+    insta::assert_snapshot!(dot_output);
 }

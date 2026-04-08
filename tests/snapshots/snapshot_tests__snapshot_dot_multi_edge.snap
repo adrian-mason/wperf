@@ -1,0 +1,13 @@
+---
+source: tests/snapshot_tests.rs
+expression: dot_output
+---
+digraph wperf {
+    rankdir=LR;
+    node [shape=box];
+    t101 [label="T101"];
+    t201 [label="T201"];
+    t301 [label="T301"];
+    t101 -> t201 [label="1ms (raw 2ms)"];
+    t201 -> t301 [label="1ms (raw 1ms)"];
+}

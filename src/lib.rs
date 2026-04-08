@@ -2,6 +2,7 @@ pub mod cascade;
 pub mod cli;
 pub mod correlate;
 pub mod critical_path;
+pub mod dot;
 pub mod format;
 pub mod graph;
 pub mod output;
