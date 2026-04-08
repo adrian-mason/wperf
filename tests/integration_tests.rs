@@ -115,7 +115,7 @@ fn fixture_single_wait_edge() {
         wakeup(2_000_000, 20, 10),
         switch(3_000_000, 20, 10),
     ];
-    let report = build_report_from(&events, 3);
+    let report = build_report_from(&events, 42);
 
     // One edge in the cascade.
     assert_eq!(report.cascade.edges.len(), 1);
@@ -126,7 +126,7 @@ fn fixture_single_wait_edge() {
     assert_eq!(edge.src, ThreadId(10));
     assert_eq!(edge.dst, ThreadId(20));
     assert_eq!(edge.raw_wait_ms, 2); // 3ms - 1ms
-    assert!(edge.attributed_delay_ms <= edge.raw_wait_ms);
+    assert_eq!(edge.attributed_delay_ms, edge.raw_wait_ms);
 
     // Critical path exists for non-empty graph.
     let cp = report
@@ -146,7 +146,7 @@ fn fixture_single_wait_edge() {
 
     // Health.
     assert!(report.health.invariants_ok);
-    assert_eq!(report.health.drop_count, Some(3));
+    assert_eq!(report.health.drop_count, Some(42));
     assert_eq!(report.health.unmatched_wakeup_count, 0);
 }
 
@@ -179,19 +179,22 @@ fn fixture_multi_hop_chain() {
     assert_eq!(report.cascade.edges.len(), 2);
     assert_eq!(report.cascade.graph_metrics.edge_count, 2);
 
-    // Both edges present (order may vary, so check by content).
-    let has_10_20 = report
+    // Both edges present with correct weights (order may vary, so find by content).
+    let edge_10_20 = report
         .cascade
         .edges
         .iter()
-        .any(|e| e.src == ThreadId(10) && e.dst == ThreadId(20));
-    let has_20_30 = report
+        .find(|e| e.src == ThreadId(10) && e.dst == ThreadId(20))
+        .expect("expected edge T10 → T20");
+    assert_eq!(edge_10_20.raw_wait_ms, 5); // 6ms - 1ms
+
+    let edge_20_30 = report
         .cascade
         .edges
         .iter()
-        .any(|e| e.src == ThreadId(20) && e.dst == ThreadId(30));
-    assert!(has_10_20, "expected edge T10 → T20");
-    assert!(has_20_30, "expected edge T20 → T30");
+        .find(|e| e.src == ThreadId(20) && e.dst == ThreadId(30))
+        .expect("expected edge T20 → T30");
+    assert_eq!(edge_20_30.raw_wait_ms, 2); // 4ms - 2ms
 
     // Critical path spans a chain of nodes.
     let cp = report
