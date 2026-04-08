@@ -106,19 +106,19 @@ fn render_svg_with_command(
     });
 
     let output = child.wait_with_output().map_err(ReportError::Io)?;
+    let writer_result = writer_thread.join().expect("stdin writer thread panicked");
 
-    // Propagate any stdin write error.
-    writer_thread
-        .join()
-        .expect("stdin writer thread panicked")
-        .map_err(ReportError::Io)?;
-
+    // Prioritize Graphviz's own error if it failed — a stdin BrokenPipe is
+    // usually a symptom of dot rejecting the input, not the root cause.
     if !output.status.success() {
         return Err(ReportError::GraphvizFailed {
             exit_code: output.status.code(),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         });
     }
+
+    // Otherwise propagate any stdin write error.
+    writer_result.map_err(ReportError::Io)?;
 
     Ok(output.stdout)
 }
