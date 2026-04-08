@@ -97,16 +97,21 @@ fn render_svg_with_command(
             }
         })?;
 
-    // Write DOT to stdin, then close it so `dot` can process.
-    {
+    // Write DOT to stdin in a separate thread to avoid deadlock: if dot's
+    // stdout/stderr buffers fill before we finish writing, both processes block.
+    let mut stdin = child.stdin.take().expect("stdin was piped");
+    let writer_thread = std::thread::spawn(move || {
         use std::io::Write;
-        let stdin = child.stdin.as_mut().expect("stdin was piped");
-        stdin
-            .write_all(dot_input.as_bytes())
-            .map_err(ReportError::Io)?;
-    }
+        stdin.write_all(dot_input.as_bytes())
+    });
 
     let output = child.wait_with_output().map_err(ReportError::Io)?;
+
+    // Propagate any stdin write error.
+    writer_thread
+        .join()
+        .expect("stdin writer thread panicked")
+        .map_err(ReportError::Io)?;
 
     if !output.status.success() {
         return Err(ReportError::GraphvizFailed {
