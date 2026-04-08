@@ -201,9 +201,10 @@ fn fixture_multi_hop_chain() {
         .critical_path
         .as_ref()
         .expect("critical path should exist");
-    assert!(
-        cp.chain.len() >= 2,
-        "multi-hop chain should have ≥2 path nodes"
+    assert_eq!(
+        cp.chain.len(),
+        3,
+        "linear 3-node chain should have exactly 3 path nodes"
     );
     assert!(cp.total_weight > 0);
 
