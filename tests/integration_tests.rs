@@ -17,27 +17,37 @@ use wperf::graph::types::ThreadId;
 use wperf::report;
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/// Linux `TASK_INTERRUPTIBLE` state — indicates the thread went to sleep
+/// voluntarily. Required for a valid off-CPU context switch in the correlator.
+const TASK_INTERRUPTIBLE: u8 = 1;
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 fn write_trace(events: &[WperfEvent], drop_count: u64) -> Vec<u8> {
     let buf = Cursor::new(Vec::new());
-    let mut w = WperfWriter::new(buf).unwrap();
+    let mut w = WperfWriter::new(buf).expect("failed to create WperfWriter");
     for ev in events {
-        w.write_event(ev).unwrap();
+        w.write_event(ev).expect("failed to write event to trace");
     }
-    let buf = w.finish(drop_count).unwrap();
+    let buf = w
+        .finish(drop_count)
+        .expect("failed to finalize trace writer");
     buf.into_inner()
 }
 
 fn build_report_from(events: &[WperfEvent], drop_count: u64) -> report::ReportOutput {
     let data = write_trace(events, drop_count);
-    let mut reader = WperfReader::open(Cursor::new(data)).unwrap();
-    report::build_report(&mut reader).unwrap()
+    let mut reader =
+        WperfReader::open(Cursor::new(data)).expect("failed to open constructed trace");
+    report::build_report(&mut reader).expect("failed to build report from constructed trace")
 }
 
-/// Context switch: `prev_tid` goes off-CPU (`prev_state`=1 means sleeping),
-/// `next_tid` comes on-CPU.
+/// Context switch: `prev_tid` goes off-CPU (sleeping), `next_tid` comes on-CPU.
 fn switch(ts_ns: u64, prev_tid: u32, next_tid: u32) -> WperfEvent {
     WperfEvent {
         timestamp_ns: ts_ns,
@@ -49,7 +59,7 @@ fn switch(ts_ns: u64, prev_tid: u32, next_tid: u32) -> WperfEvent {
         next_pid: 0,
         cpu: 0,
         event_type: EventType::Switch as u8,
-        prev_state: 1, // sleeping — required for valid off-CPU switch
+        prev_state: TASK_INTERRUPTIBLE,
         flags: 0,
     }
 }
