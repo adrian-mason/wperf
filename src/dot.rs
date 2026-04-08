@@ -1,13 +1,14 @@
-//! Graphviz DOT backend for cascade results.
+//! Graphviz DOT and SVG backends for cascade results.
 //!
-//! Converts a `CascadeResult` into DOT format for visualization via
-//! `dot -Tsvg`. This is the W3 #19 DOT text backend; actual SVG
-//! generation is deferred to a follow-up task.
+//! Converts a `CascadeResult` into DOT format for visualization, and
+//! optionally renders SVG by invoking external Graphviz `dot -Tsvg`.
 
 use std::fmt::Write;
+use std::process::Command;
 
 use crate::graph::types::ThreadId;
 use crate::output::{CascadeResult, EdgeOutput};
+use crate::report::ReportError;
 
 /// Render a `CascadeResult` as a Graphviz DOT digraph.
 ///
@@ -67,11 +68,63 @@ fn dot_id(tid: i64) -> String {
     }
 }
 
+/// Render a `CascadeResult` as SVG by piping DOT through Graphviz `dot -Tsvg`.
+///
+/// Returns `ReportError::GraphvizNotFound` if `dot` is not in PATH, or
+/// `ReportError::GraphvizFailed` if the process exits non-zero.
+pub fn render_svg(cascade: &CascadeResult) -> Result<Vec<u8>, ReportError> {
+    render_svg_with_command(cascade, "dot")
+}
+
+/// Internal testable seam: same as `render_svg` but accepts a custom command path.
+fn render_svg_with_command(
+    cascade: &CascadeResult,
+    dot_command: &str,
+) -> Result<Vec<u8>, ReportError> {
+    let dot_input = render_dot(cascade);
+
+    let mut child = Command::new(dot_command)
+        .args(["-Tsvg"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                ReportError::GraphvizNotFound
+            } else {
+                ReportError::Io(e)
+            }
+        })?;
+
+    // Write DOT to stdin, then close it so `dot` can process.
+    {
+        use std::io::Write;
+        let stdin = child.stdin.as_mut().expect("stdin was piped");
+        stdin
+            .write_all(dot_input.as_bytes())
+            .map_err(ReportError::Io)?;
+    }
+
+    let output = child.wait_with_output().map_err(ReportError::Io)?;
+
+    if !output.status.success() {
+        return Err(ReportError::GraphvizFailed {
+            exit_code: output.status.code(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        });
+    }
+
+    Ok(output.stdout)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::graph::types::ThreadId;
     use crate::output::{CascadeResult, EdgeOutput, GraphMetrics};
+    use crate::report::ReportError;
+    use std::process::Command;
 
     fn make_cascade(edges: Vec<EdgeOutput>) -> CascadeResult {
         let edge_count = edges.len();
@@ -186,5 +239,68 @@ mod tests {
         let pos_3ms = dot.find("label=\"3ms (raw 5ms)\"").unwrap();
         let pos_8ms = dot.find("label=\"8ms (raw 10ms)\"").unwrap();
         assert!(pos_3ms < pos_8ms);
+    }
+
+    // --- SVG rendering tests ---
+
+    #[test]
+    fn svg_missing_command_returns_not_found() {
+        let cascade = make_cascade(vec![]);
+        let err = render_svg_with_command(&cascade, "nonexistent-dot-binary-xyz")
+            .expect_err("should fail with missing command");
+        assert!(
+            matches!(err, ReportError::GraphvizNotFound),
+            "expected GraphvizNotFound, got: {err}"
+        );
+    }
+
+    #[test]
+    fn svg_bad_command_returns_failed() {
+        // Use `false` as the command — it exits with code 1.
+        let cascade = make_cascade(vec![]);
+        let err =
+            render_svg_with_command(&cascade, "false").expect_err("should fail with non-zero exit");
+        assert!(
+            matches!(err, ReportError::GraphvizFailed { .. }),
+            "expected GraphvizFailed, got: {err}"
+        );
+    }
+
+    #[test]
+    fn svg_single_edge_produces_valid_svg() {
+        // Skip if `dot` is not installed (developer convenience).
+        if Command::new("dot").arg("-V").output().is_err() {
+            eprintln!("skipping svg test: dot not found");
+            return;
+        }
+        let cascade = make_cascade(vec![EdgeOutput {
+            src: ThreadId(100),
+            dst: ThreadId(200),
+            raw_wait_ms: 5,
+            attributed_delay_ms: 3,
+        }]);
+        let svg = render_svg_with_command(&cascade, "dot").unwrap();
+        let svg_str = String::from_utf8(svg).expect("SVG should be valid UTF-8");
+        assert!(
+            svg_str.contains("<svg"),
+            "output should contain <svg element"
+        );
+        assert!(
+            svg_str.contains("</svg>"),
+            "output should contain closing </svg>"
+        );
+    }
+
+    #[test]
+    fn svg_empty_graph_produces_valid_svg() {
+        if Command::new("dot").arg("-V").output().is_err() {
+            eprintln!("skipping svg test: dot not found");
+            return;
+        }
+        let cascade = make_cascade(vec![]);
+        let svg = render_svg_with_command(&cascade, "dot").unwrap();
+        let svg_str = String::from_utf8(svg).expect("SVG should be valid UTF-8");
+        assert!(svg_str.contains("<svg"));
+        assert!(svg_str.contains("</svg>"));
     }
 }

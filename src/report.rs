@@ -29,6 +29,13 @@ pub enum ReportError {
     Io(std::io::Error),
     Pipeline(PipelineError),
     Cascade(InvariantError),
+    /// Graphviz `dot` executable not found in PATH.
+    GraphvizNotFound,
+    /// Graphviz `dot` exited with a non-zero status.
+    GraphvizFailed {
+        exit_code: Option<i32>,
+        stderr: String,
+    },
 }
 
 impl std::fmt::Display for ReportError {
@@ -37,6 +44,23 @@ impl std::fmt::Display for ReportError {
             Self::Io(e) => write!(f, "I/O error: {e}"),
             Self::Pipeline(e) => write!(f, "pipeline error: {e}"),
             Self::Cascade(e) => write!(f, "cascade invariant error: {e}"),
+            Self::GraphvizNotFound => write!(
+                f,
+                "Graphviz 'dot' not found in PATH; \
+                 install graphviz (https://graphviz.org) or use --format dot"
+            ),
+            Self::GraphvizFailed { exit_code, stderr } => {
+                write!(f, "Graphviz 'dot' failed")?;
+                if let Some(code) = exit_code {
+                    write!(f, " (exit code {code})")?;
+                }
+                if !stderr.is_empty() {
+                    // Bound stderr to avoid dumping unbounded process output.
+                    let truncated: String = stderr.chars().take(1024).collect();
+                    write!(f, ": {truncated}")?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -47,6 +71,7 @@ impl std::error::Error for ReportError {
             Self::Io(e) => Some(e),
             Self::Pipeline(e) => Some(e),
             Self::Cascade(e) => Some(e),
+            Self::GraphvizNotFound | Self::GraphvizFailed { .. } => None,
         }
     }
 }
@@ -123,6 +148,13 @@ pub fn run(args: &ReportArgs) -> Result<(), ReportError> {
             let mut writer = BufWriter::new(stdout);
             let dot_output = dot::render_dot(&report.cascade);
             writer.write_all(dot_output.as_bytes())?;
+            writer.flush()?;
+        }
+        ReportFormat::Svg => {
+            let svg = dot::render_svg(&report.cascade)?;
+            let stdout = std::io::stdout().lock();
+            let mut writer = BufWriter::new(stdout);
+            writer.write_all(&svg)?;
             writer.flush()?;
         }
     }
@@ -365,11 +397,40 @@ mod tests {
             std::io::Error::other("test"),
         )));
         assert!(format!("{err}").contains("pipeline error"));
+
+        let err = ReportError::GraphvizNotFound;
+        let msg = format!("{err}");
+        assert!(msg.contains("not found in PATH"));
+        assert!(msg.contains("--format dot"));
+
+        let err = ReportError::GraphvizFailed {
+            exit_code: Some(1),
+            stderr: "syntax error".to_string(),
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("exit code 1"));
+        assert!(msg.contains("syntax error"));
+
+        let err = ReportError::GraphvizFailed {
+            exit_code: None,
+            stderr: String::new(),
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("failed"));
     }
 
     #[test]
     fn error_source() {
         let err = ReportError::Io(std::io::Error::other("test"));
         assert!(std::error::Error::source(&err).is_some());
+
+        let err = ReportError::GraphvizNotFound;
+        assert!(std::error::Error::source(&err).is_none());
+
+        let err = ReportError::GraphvizFailed {
+            exit_code: Some(1),
+            stderr: "test".into(),
+        };
+        assert!(std::error::Error::source(&err).is_none());
     }
 }

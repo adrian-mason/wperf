@@ -62,6 +62,7 @@ pub struct ReportArgs {
 pub enum ReportFormat {
     Json,
     Dot,
+    Svg,
 }
 
 /// Parse a positive duration value (rejects zero and negative).
