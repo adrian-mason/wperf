@@ -280,3 +280,140 @@ fn fixture_drop_count_propagation() {
     let report = build_report_from(&[], 12345);
     assert_eq!(report.health.drop_count, Some(12345));
 }
+
+// ---------------------------------------------------------------------------
+// Crash recovery helpers
+// ---------------------------------------------------------------------------
+
+/// Header field offsets (from header.rs binary layout).
+const HEADER_SIZE: usize = 64;
+const DATA_SECTION_END_OFFSET_POS: std::ops::Range<usize> = 8..16;
+const SECTION_TABLE_OFFSET_POS: std::ops::Range<usize> = 16..24;
+
+/// TLV record size: 5 (type + length) + 40 (event payload).
+const TLV_RECORD_SIZE: usize = 45;
+
+/// Simulate a crash by patching the header to remove the footer and set
+/// `data_section_end_offset` to cover exactly `recoverable_events` events.
+fn simulate_crash(mut data: Vec<u8>, recoverable_events: usize) -> Vec<u8> {
+    let data_end = (HEADER_SIZE + recoverable_events * TLV_RECORD_SIZE) as u64;
+    data[DATA_SECTION_END_OFFSET_POS].copy_from_slice(&data_end.to_le_bytes());
+    // section_table_offset = 0 → no footer (crash scenario).
+    data[SECTION_TABLE_OFFSET_POS].copy_from_slice(&0u64.to_le_bytes());
+    data
+}
+
+fn build_report_from_raw(data: Vec<u8>) -> report::ReportOutput {
+    let mut reader = WperfReader::open(Cursor::new(data)).expect("failed to open raw trace");
+    report::build_report(&mut reader).expect("failed to build report from raw trace")
+}
+
+// ---------------------------------------------------------------------------
+// Fixture: crash recovery — truncation at record boundary
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fixture_crash_recovery_record_boundary() {
+    // Write 3 events forming a matched pair (T10→T20) + an extra switch.
+    // Simulate crash: data_section_end_offset covers only 3 events, no footer.
+    // All 3 events are intact → full pipeline should recover them.
+    let events = vec![
+        switch(1_000_000, 10, 20),
+        wakeup(2_000_000, 20, 10),
+        switch(3_000_000, 20, 10),
+    ];
+    let data = write_trace(&events, 99);
+    let data = simulate_crash(data, 3);
+
+    let report = build_report_from_raw(data);
+
+    // Pipeline recovers the matched pair → one edge.
+    assert_eq!(report.cascade.edges.len(), 1);
+    assert_eq!(report.cascade.edges[0].src, ThreadId(10));
+    assert_eq!(report.cascade.edges[0].dst, ThreadId(20));
+    assert_eq!(report.stats.events_read, 3);
+
+    // No footer → drop_count is None (unknown).
+    assert_eq!(report.health.drop_count, None);
+    assert!(report.health.invariants_ok);
+}
+
+// ---------------------------------------------------------------------------
+// Fixture: crash recovery — mid-record truncation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fixture_crash_recovery_mid_record_truncation() {
+    // Write 3 events, but physically truncate the file mid-way through
+    // the 3rd record. data_section_end_offset covers only 2 complete events.
+    // The reader should parse exactly 2 events.
+    let events = vec![
+        switch(1_000_000, 10, 20),
+        wakeup(2_000_000, 20, 10),
+        switch(3_000_000, 20, 10),
+    ];
+    let data = write_trace(&events, 0);
+
+    // Truncate: keep header + 2 full records + 3 bytes of 3rd record.
+    let truncated_len = HEADER_SIZE + 2 * TLV_RECORD_SIZE + 3;
+    let mut truncated = data[..truncated_len].to_vec();
+
+    // Patch header: data_section_end_offset covers 2 events, no footer.
+    truncated = simulate_crash(truncated, 2);
+
+    let report = build_report_from_raw(truncated);
+
+    // Only 2 events recovered — the wakeup lacks a matching back-on switch,
+    // so no complete edge is formed. But both events are processed.
+    assert_eq!(report.stats.events_read, 2);
+    assert_eq!(report.health.drop_count, None);
+    assert!(report.health.invariants_ok);
+}
+
+// ---------------------------------------------------------------------------
+// Fixture: crash recovery — zero events
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fixture_crash_recovery_zero_events() {
+    // Crash immediately after writing the header — no events at all.
+    let data = write_trace(&[], 0);
+    let data = simulate_crash(data, 0);
+
+    let report = build_report_from_raw(data);
+
+    assert_eq!(report.stats.events_read, 0);
+    assert_eq!(report.cascade.edges.len(), 0);
+    assert_eq!(report.health.drop_count, None);
+    assert!(report.health.invariants_ok);
+}
+
+// ---------------------------------------------------------------------------
+// Fixture: crash recovery — data_section_end_offset past file length (clamp)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fixture_crash_recovery_offset_past_eof() {
+    // Write 2 events. Truncate the file so it's shorter than the
+    // data_section_end_offset claims. The reader must clamp to file length
+    // and recover what's physically present.
+    let events = vec![switch(1_000_000, 10, 20), wakeup(2_000_000, 20, 10)];
+    let data = write_trace(&events, 0);
+
+    // Physical file contains only header + 1 event, but header says 2.
+    let physical_len = HEADER_SIZE + TLV_RECORD_SIZE;
+    let mut truncated = data[..physical_len].to_vec();
+
+    // Patch: data_section_end_offset claims 2 events worth, no footer.
+    let fake_end = (HEADER_SIZE + 2 * TLV_RECORD_SIZE) as u64;
+    truncated[DATA_SECTION_END_OFFSET_POS].copy_from_slice(&fake_end.to_le_bytes());
+    truncated[SECTION_TABLE_OFFSET_POS].copy_from_slice(&0u64.to_le_bytes());
+
+    let report = build_report_from_raw(truncated);
+
+    // Reader clamps to file length → only 1 event recovered.
+    assert_eq!(report.stats.events_read, 1);
+    assert_eq!(report.cascade.edges.len(), 0); // single event can't form edge
+    assert_eq!(report.health.drop_count, None);
+    assert!(report.health.invariants_ok);
+}
