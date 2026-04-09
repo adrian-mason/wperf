@@ -400,8 +400,8 @@ fn fixture_crash_recovery_offset_past_eof() {
     let events = vec![switch(1_000_000, 10, 20), wakeup(2_000_000, 20, 10)];
     let data = write_trace(&events, 0);
 
-    // Physical file contains only header + 1 event, but header claims 2.
-    let physical_len = HEADER_SIZE + TLV_RECORD_SIZE;
+    // Physical file contains header + 1 event + 3 bytes of 2nd, but header claims 2.
+    let physical_len = HEADER_SIZE + TLV_RECORD_SIZE + 3;
     let truncated = data[..physical_len].to_vec();
     let truncated = simulate_crash(truncated, 2);
 
