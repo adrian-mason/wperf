@@ -11,7 +11,7 @@
 use std::io::Cursor;
 
 use wperf::format::event::{EVENT_SIZE, EventType, WperfEvent};
-use wperf::format::header::HEADER_SIZE;
+use wperf::format::header::{HEADER_SIZE, WprfHeader};
 use wperf::format::reader::WperfReader;
 use wperf::format::writer::{TLV_HEADER_SIZE, WperfWriter};
 use wperf::graph::types::ThreadId;
@@ -286,20 +286,20 @@ fn fixture_drop_count_propagation() {
 // Crash recovery helpers
 // ---------------------------------------------------------------------------
 
-/// Header field byte offsets (from header.rs binary layout).
-const DATA_SECTION_END_OFFSET_POS: std::ops::Range<usize> = 8..16;
-const SECTION_TABLE_OFFSET_POS: std::ops::Range<usize> = 16..24;
-
 /// TLV record size derived from crate constants.
 const TLV_RECORD_SIZE: usize = TLV_HEADER_SIZE + EVENT_SIZE;
 
 /// Simulate a crash by patching the header to remove the footer and set
 /// `data_section_end_offset` to cover exactly `recoverable_events` events.
 fn simulate_crash(mut data: Vec<u8>, recoverable_events: usize) -> Vec<u8> {
-    let data_end = (HEADER_SIZE + recoverable_events * TLV_RECORD_SIZE) as u64;
-    data[DATA_SECTION_END_OFFSET_POS].copy_from_slice(&data_end.to_le_bytes());
-    // section_table_offset = 0 → no footer (crash scenario).
-    data[SECTION_TABLE_OFFSET_POS].copy_from_slice(&0u64.to_le_bytes());
+    let mut header =
+        WprfHeader::from_bytes(data[..HEADER_SIZE].try_into().expect("buffer too small"))
+            .expect("failed to parse header");
+
+    header.data_section_end_offset = (HEADER_SIZE + recoverable_events * TLV_RECORD_SIZE) as u64;
+    header.section_table_offset = 0;
+
+    data[..HEADER_SIZE].copy_from_slice(&header.to_bytes());
     data
 }
 
