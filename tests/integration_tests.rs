@@ -10,9 +10,10 @@
 
 use std::io::Cursor;
 
-use wperf::format::event::{EventType, WperfEvent};
+use wperf::format::event::{EVENT_SIZE, EventType, WperfEvent};
+use wperf::format::header::HEADER_SIZE;
 use wperf::format::reader::WperfReader;
-use wperf::format::writer::WperfWriter;
+use wperf::format::writer::{TLV_HEADER_SIZE, WperfWriter};
 use wperf::graph::types::ThreadId;
 use wperf::report;
 
@@ -285,13 +286,12 @@ fn fixture_drop_count_propagation() {
 // Crash recovery helpers
 // ---------------------------------------------------------------------------
 
-/// Header field offsets (from header.rs binary layout).
-const HEADER_SIZE: usize = 64;
+/// Header field byte offsets (from header.rs binary layout).
 const DATA_SECTION_END_OFFSET_POS: std::ops::Range<usize> = 8..16;
 const SECTION_TABLE_OFFSET_POS: std::ops::Range<usize> = 16..24;
 
-/// TLV record size: 5 (type + length) + 40 (event payload).
-const TLV_RECORD_SIZE: usize = 45;
+/// TLV record size derived from crate constants.
+const TLV_RECORD_SIZE: usize = TLV_HEADER_SIZE + EVENT_SIZE;
 
 /// Simulate a crash by patching the header to remove the footer and set
 /// `data_section_end_offset` to cover exactly `recoverable_events` events.
@@ -400,14 +400,10 @@ fn fixture_crash_recovery_offset_past_eof() {
     let events = vec![switch(1_000_000, 10, 20), wakeup(2_000_000, 20, 10)];
     let data = write_trace(&events, 0);
 
-    // Physical file contains only header + 1 event, but header says 2.
+    // Physical file contains only header + 1 event, but header claims 2.
     let physical_len = HEADER_SIZE + TLV_RECORD_SIZE;
-    let mut truncated = data[..physical_len].to_vec();
-
-    // Patch: data_section_end_offset claims 2 events worth, no footer.
-    let fake_end = (HEADER_SIZE + 2 * TLV_RECORD_SIZE) as u64;
-    truncated[DATA_SECTION_END_OFFSET_POS].copy_from_slice(&fake_end.to_le_bytes());
-    truncated[SECTION_TABLE_OFFSET_POS].copy_from_slice(&0u64.to_le_bytes());
+    let truncated = data[..physical_len].to_vec();
+    let truncated = simulate_crash(truncated, 2);
 
     let report = build_report_from_raw(truncated);
 
