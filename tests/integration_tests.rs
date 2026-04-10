@@ -291,7 +291,7 @@ const TLV_RECORD_SIZE: usize = TLV_HEADER_SIZE + EVENT_SIZE;
 
 /// Simulate a crash by patching the header to remove the footer and set
 /// `data_section_end_offset` to cover exactly `recoverable_events` events.
-fn simulate_crash(mut data: Vec<u8>, recoverable_events: usize) -> Vec<u8> {
+fn simulate_crash(data: &mut [u8], recoverable_events: usize) {
     let mut header =
         WprfHeader::from_bytes(data[..HEADER_SIZE].try_into().expect("buffer too small"))
             .expect("failed to parse header");
@@ -300,7 +300,6 @@ fn simulate_crash(mut data: Vec<u8>, recoverable_events: usize) -> Vec<u8> {
     header.section_table_offset = 0;
 
     data[..HEADER_SIZE].copy_from_slice(&header.to_bytes());
-    data
 }
 
 fn build_report_from_raw(data: Vec<u8>) -> report::ReportOutput {
@@ -322,8 +321,8 @@ fn fixture_crash_recovery_record_boundary() {
         wakeup(2_000_000, 20, 10),
         switch(3_000_000, 20, 10),
     ];
-    let data = write_trace(&events, 99);
-    let data = simulate_crash(data, 3);
+    let mut data = write_trace(&events, 99);
+    simulate_crash(&mut data, 3);
 
     let report = build_report_from_raw(data);
 
@@ -359,7 +358,7 @@ fn fixture_crash_recovery_mid_record_truncation() {
     let mut truncated = data[..truncated_len].to_vec();
 
     // Patch header: data_section_end_offset covers 2 events, no footer.
-    truncated = simulate_crash(truncated, 2);
+    simulate_crash(&mut truncated, 2);
 
     let report = build_report_from_raw(truncated);
 
@@ -377,8 +376,8 @@ fn fixture_crash_recovery_mid_record_truncation() {
 #[test]
 fn fixture_crash_recovery_zero_events() {
     // Crash immediately after writing the header — no events at all.
-    let data = write_trace(&[], 0);
-    let data = simulate_crash(data, 0);
+    let mut data = write_trace(&[], 0);
+    simulate_crash(&mut data, 0);
 
     let report = build_report_from_raw(data);
 
@@ -402,8 +401,8 @@ fn fixture_crash_recovery_offset_past_eof() {
 
     // Physical file contains header + 1 event + 3 bytes of 2nd, but header claims 2.
     let physical_len = HEADER_SIZE + TLV_RECORD_SIZE + 3;
-    let truncated = data[..physical_len].to_vec();
-    let truncated = simulate_crash(truncated, 2);
+    let mut truncated = data[..physical_len].to_vec();
+    simulate_crash(&mut truncated, 2);
 
     let report = build_report_from_raw(truncated);
 
