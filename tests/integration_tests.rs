@@ -399,8 +399,10 @@ fn fixture_crash_recovery_offset_past_eof() {
     let events = vec![switch(1_000_000, 10, 20), wakeup(2_000_000, 20, 10)];
     let data = write_trace(&events, 0);
 
-    // Physical file contains header + 1 event + 3 bytes of 2nd, but header claims 2.
-    let physical_len = HEADER_SIZE + TLV_RECORD_SIZE + 3;
+    // Physical file contains header + 1 event + 10 bytes of 2nd, but header claims 2.
+    // 10 bytes > TLV_HEADER_SIZE (5), so the TLV header is readable but payload
+    // is incomplete — exercises truncated-payload branch, not just truncated-header.
+    let physical_len = HEADER_SIZE + TLV_RECORD_SIZE + 10;
     let mut truncated = data[..physical_len].to_vec();
     simulate_crash(&mut truncated, 2);
 
