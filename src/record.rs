@@ -106,8 +106,7 @@ fn record_impl(args: &RecordArgs, stop_requested: &Arc<AtomicBool>) -> Result<()
 
     // --- Step 1: Feature probing ---
     let paths = ProbePaths::default();
-    let features = probe::probe_all(&paths)
-        .map_err(|e| RecordError::Probe(e.to_string()))?;
+    let features = probe::probe_all(&paths).map_err(|e| RecordError::Probe(e.to_string()))?;
     let transport_config = match args.buffer_size {
         Some(size) => match features.transport {
             TransportMode::RingBuf => TransportConfig::ringbuf(size),
@@ -157,7 +156,10 @@ fn record_impl(args: &RecordArgs, stop_requested: &Arc<AtomicBool>) -> Result<()
         .attach()
         .map_err(|e| RecordError::Bpf(format!("skeleton attach: {e}")))?;
 
-    eprintln!("wperf: probes attached, recording to {}", args.output.display());
+    eprintln!(
+        "wperf: probes attached, recording to {}",
+        args.output.display()
+    );
 
     // --- Step 3: Create writer ---
     let file = File::create(&args.output)?;
@@ -166,7 +168,9 @@ fn record_impl(args: &RecordArgs, stop_requested: &Arc<AtomicBool>) -> Result<()
 
     // --- Step 4: Poll loop ---
     let start = Instant::now();
-    let deadline = args.duration.map(|d| start + std::time::Duration::from_secs_f64(d));
+    let deadline = args
+        .duration
+        .map(|d| start + std::time::Duration::from_secs_f64(d));
     let mut event_count: u64 = 0;
     let mut transport_lost: u64 = 0;
 
@@ -202,7 +206,9 @@ fn record_impl(args: &RecordArgs, stop_requested: &Arc<AtomicBool>) -> Result<()
     let drop_count = bpf_drops + transport_lost;
 
     let inner = writer.finish(drop_count)?;
-    inner.into_inner().map_err(|e| RecordError::Io(e.into_error()))?;
+    inner
+        .into_inner()
+        .map_err(|e| RecordError::Io(e.into_error()))?;
 
     let elapsed = start.elapsed();
     eprintln!(
