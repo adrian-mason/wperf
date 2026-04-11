@@ -62,20 +62,21 @@ impl<W: Write + Seek> WperfWriter<W> {
         }
         self.end_timestamp_ns = self.end_timestamp_ns.max(event.timestamp_ns);
 
-        // TLV header
-        self.inner.write_all(&[REC_TYPE_SCHED_EVENT])?;
-        #[allow(clippy::cast_possible_truncation)] // EVENT_SIZE is 40, always fits u32
-        self.inner.write_all(&(EVENT_SIZE as u32).to_le_bytes())?;
-
-        // Event payload
-        event.write_to(&mut self.inner)?;
+        // TLV header + event payload in a single write_all (45 bytes).
+        let mut record = [0u8; TLV_HEADER_SIZE + EVENT_SIZE];
+        record[0] = REC_TYPE_SCHED_EVENT;
+        #[allow(clippy::cast_possible_truncation)]
+        record[1..5].copy_from_slice(&(EVENT_SIZE as u32).to_le_bytes());
+        record[5..].copy_from_slice(&event.to_bytes());
+        self.inner.write_all(&record)?;
 
         self.event_count += 1;
 
         // Periodically update data_section_end_offset for crash recovery.
-        // Every 1024 events, flush the current write position into the header
-        // so a crash-recovery reader knows how far valid data extends.
-        if self.event_count.is_multiple_of(1024) {
+        // Every 8192 events (~368 KiB of TLV data), flush the current write
+        // position into the header so a crash-recovery reader knows how far
+        // valid data extends. Spec §4.4 requires no granularity SLA.
+        if self.event_count.is_multiple_of(8192) {
             self.update_data_offset()?;
         }
 
@@ -349,14 +350,14 @@ mod tests {
         let buf = Cursor::new(Vec::new());
         let mut w = WperfWriter::new(buf).unwrap();
 
-        // Write 1024 events to trigger one crash-recovery update
-        for i in 0..1024 {
+        // Write 8192 events to trigger one crash-recovery update
+        for i in 0..8192 {
             let ev = make_event(i * 1000, EventType::Switch);
             w.write_event(&ev).unwrap();
         }
 
-        // After 1024 events, data_section_end_offset should be updated
-        let expected_offset = HEADER_SIZE as u64 + 1024 * (TLV_HEADER_SIZE + EVENT_SIZE) as u64;
+        // After 8192 events, data_section_end_offset should be updated
+        let expected_offset = HEADER_SIZE as u64 + 8192 * (TLV_HEADER_SIZE + EVENT_SIZE) as u64;
         assert_eq!(w.header.data_section_end_offset, expected_offset);
     }
 
