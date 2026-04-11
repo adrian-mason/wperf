@@ -161,7 +161,7 @@ fn record_impl(args: &RecordArgs, stop_requested: &Arc<AtomicBool>) -> Result<()
 
     // --- Step 3: Create writer ---
     let file = File::create(&args.output)?;
-    let buf_writer = BufWriter::new(file);
+    let buf_writer = BufWriter::with_capacity(1 << 20, file);
     let mut writer = WperfWriter::new(buf_writer)?;
 
     // --- Step 4: Poll loop ---
