@@ -65,19 +65,21 @@ STRESSOR="--matrix 64"
 STRESSOR_NAME="matrix-64"
 
 CALIBRATE_TRACE="$(mktemp /tmp/overhead_calibrate_XXXXXX.wperf)"
+CAL_LOG="$(mktemp /tmp/overhead_cal_log_XXXXXX.txt)"
 stress-ng $STRESSOR --timeout 5 &>/dev/null &
 CAL_STRESS_PID=$!
 sleep 0.5
 
-"$WPERF" record -o "$CALIBRATE_TRACE" -d 5 2>&1 &
+"$WPERF" record -o "$CALIBRATE_TRACE" -d 5 2>"$CAL_LOG" &
 CAL_WPERF_PID=$!
 wait "$CAL_WPERF_PID" 2>/dev/null || true
 wait "$CAL_STRESS_PID" 2>/dev/null || true
 
-CAL_REPORT="$("$WPERF" report "$CALIBRATE_TRACE" 2>/dev/null)"
-CAL_EVENTS=$(echo "$CAL_REPORT" | jq '.stats.events_read')
+cat "$CAL_LOG"
+CAL_EVENTS=$(grep -oP '[0-9]+ events' "$CAL_LOG" | grep -oP '[0-9]+')
+CAL_EVENTS=${CAL_EVENTS:-0}
 CAL_RATE=$((CAL_EVENTS / 5))
-rm -f "$CALIBRATE_TRACE"
+rm -f "$CALIBRATE_TRACE" "$CAL_LOG"
 
 echo "Calibration: $STRESSOR_NAME → $CAL_EVENTS events in 5s ($CAL_RATE events/sec)"
 
@@ -88,19 +90,21 @@ if [ "$CAL_RATE" -lt "$MIN_EVENTS_PER_SEC" ]; then
     STRESSOR_NAME="context-64"
 
     CALIBRATE_TRACE="$(mktemp /tmp/overhead_calibrate_XXXXXX.wperf)"
+    CAL_LOG="$(mktemp /tmp/overhead_cal_log_XXXXXX.txt)"
     stress-ng $STRESSOR --timeout 5 &>/dev/null &
     CAL_STRESS_PID=$!
     sleep 0.5
 
-    "$WPERF" record -o "$CALIBRATE_TRACE" -d 5 2>&1 &
+    "$WPERF" record -o "$CALIBRATE_TRACE" -d 5 2>"$CAL_LOG" &
     CAL_WPERF_PID=$!
     wait "$CAL_WPERF_PID" 2>/dev/null || true
     wait "$CAL_STRESS_PID" 2>/dev/null || true
 
-    CAL_REPORT="$("$WPERF" report "$CALIBRATE_TRACE" 2>/dev/null)"
-    CAL_EVENTS=$(echo "$CAL_REPORT" | jq '.stats.events_read')
+    cat "$CAL_LOG"
+    CAL_EVENTS=$(grep -oP '[0-9]+ events' "$CAL_LOG" | grep -oP '[0-9]+')
+    CAL_EVENTS=${CAL_EVENTS:-0}
     CAL_RATE=$((CAL_EVENTS / 5))
-    rm -f "$CALIBRATE_TRACE"
+    rm -f "$CALIBRATE_TRACE" "$CAL_LOG"
 
     echo "Calibration: $STRESSOR_NAME → $CAL_EVENTS events in 5s ($CAL_RATE events/sec)"
 
@@ -133,8 +137,9 @@ for RUN in $(seq 1 "$NUM_RUNS"); do
     STRESS_PID=$!
     sleep 1
 
-    # Start wperf record
-    "$WPERF" record -o "$TRACE_FILE" -d "$DURATION" 2>&1 &
+    # Start wperf record, capture stderr for summary parsing
+    WPERF_LOG="$(mktemp /tmp/overhead_wperf_XXXXXX.log)"
+    "$WPERF" record -o "$TRACE_FILE" -d "$DURATION" 2>"$WPERF_LOG" &
     WPERF_PID=$!
     sleep 0.5
 
@@ -174,11 +179,16 @@ for RUN in $(seq 1 "$NUM_RUNS"); do
         RUN_CPU_MEANS+=("$CPU_MEAN")
     fi
 
-    # Get event count and drop count from wperf report
-    REPORT="$("$WPERF" report "$TRACE_FILE" 2>/dev/null)"
-    EVENT_COUNT=$(echo "$REPORT" | jq '.stats.events_read')
-    DROP_COUNT=$(echo "$REPORT" | jq '.health.drop_count // 0')
+    # Parse event count and drop count from wperf record's stderr summary.
+    # Format: "wperf: recording complete — <N> events, <M> drops, <T>s"
+    # This avoids running wperf report on multi-million event traces.
+    cat "$WPERF_LOG"
+    EVENT_COUNT=$(grep -oP '[0-9]+ events' "$WPERF_LOG" | grep -oP '[0-9]+')
+    DROP_COUNT=$(grep -oP '[0-9]+ drops' "$WPERF_LOG" | grep -oP '[0-9]+')
+    EVENT_COUNT=${EVENT_COUNT:-0}
+    DROP_COUNT=${DROP_COUNT:-0}
     EVENT_RATE=$((EVENT_COUNT / DURATION))
+    rm -f "$WPERF_LOG"
 
     echo "  events=$EVENT_COUNT ($EVENT_RATE/sec), drops=$DROP_COUNT"
     RUN_EVENT_COUNTS+=("$EVENT_COUNT")
