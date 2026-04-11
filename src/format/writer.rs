@@ -129,6 +129,34 @@ impl<W: Write + Seek> WperfWriter<W> {
         Ok(self.inner)
     }
 
+    /// Write a raw event (already in wire format) wrapped in a TLV record.
+    ///
+    /// Skips the `from_bytes`/`to_bytes` roundtrip — the caller guarantees
+    /// `raw` is exactly `EVENT_SIZE` bytes in the correct wire layout.
+    pub fn write_event_raw(&mut self, raw: &[u8; EVENT_SIZE]) -> io::Result<()> {
+        // Extract timestamp (bytes 0..8, little-endian u64) without full parse.
+        let ts = u64::from_le_bytes(raw[0..8].try_into().unwrap());
+        if self.start_timestamp_ns.is_none() {
+            self.start_timestamp_ns = Some(ts);
+        }
+        self.end_timestamp_ns = self.end_timestamp_ns.max(ts);
+
+        let mut record = [0u8; TLV_HEADER_SIZE + EVENT_SIZE];
+        record[0] = REC_TYPE_SCHED_EVENT;
+        #[allow(clippy::cast_possible_truncation)]
+        record[1..5].copy_from_slice(&(EVENT_SIZE as u32).to_le_bytes());
+        record[5..].copy_from_slice(raw);
+        self.inner.write_all(&record)?;
+
+        self.event_count += 1;
+
+        if self.event_count.is_multiple_of(8192) {
+            self.update_data_offset()?;
+        }
+
+        Ok(())
+    }
+
     /// Number of events written so far.
     pub fn event_count(&self) -> u64 {
         self.event_count

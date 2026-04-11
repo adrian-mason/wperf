@@ -246,7 +246,7 @@ fn poll_ringbuf<W: std::io::Write + std::io::Seek>(
     use std::cell::RefCell;
     use std::sync::atomic::Ordering;
 
-    use crate::format::event::{EVENT_SIZE, WperfEvent};
+    use crate::format::event::EVENT_SIZE;
 
     let writer = RefCell::new(writer);
     let count = RefCell::new(event_count);
@@ -258,10 +258,9 @@ fn poll_ringbuf<W: std::io::Write + std::io::Seek>(
             if data.len() < EVENT_SIZE {
                 return 0;
             }
-            let buf: &[u8; EVENT_SIZE] = data[..EVENT_SIZE].try_into().unwrap();
-            let event = WperfEvent::from_bytes(buf);
+            let raw: &[u8; EVENT_SIZE] = data[..EVENT_SIZE].try_into().unwrap();
             let mut w = writer.borrow_mut();
-            if let Err(e) = w.write_event(&event) {
+            if let Err(e) = w.write_event_raw(raw) {
                 *write_err.borrow_mut() = Some(e);
                 return -1;
             }
