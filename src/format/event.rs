@@ -216,8 +216,22 @@ mod tests {
 
     #[test]
     fn repr_c_layout() {
-        // Verify repr(C) layout: u64 alignment, 40B with flags field (no wasted padding)
         assert_eq!(std::mem::align_of::<WperfEvent>(), 8);
         assert_eq!(std::mem::size_of::<WperfEvent>(), 40);
+    }
+
+    #[test]
+    fn field_offsets_match_bpf_struct() {
+        assert_eq!(std::mem::offset_of!(WperfEvent, timestamp_ns), 0);
+        assert_eq!(std::mem::offset_of!(WperfEvent, pid), 8);
+        assert_eq!(std::mem::offset_of!(WperfEvent, tid), 12);
+        assert_eq!(std::mem::offset_of!(WperfEvent, prev_tid), 16);
+        assert_eq!(std::mem::offset_of!(WperfEvent, next_tid), 20);
+        assert_eq!(std::mem::offset_of!(WperfEvent, prev_pid), 24);
+        assert_eq!(std::mem::offset_of!(WperfEvent, next_pid), 28);
+        assert_eq!(std::mem::offset_of!(WperfEvent, cpu), 32);
+        assert_eq!(std::mem::offset_of!(WperfEvent, event_type), 34);
+        assert_eq!(std::mem::offset_of!(WperfEvent, prev_state), 35);
+        assert_eq!(std::mem::offset_of!(WperfEvent, flags), 36);
     }
 }
