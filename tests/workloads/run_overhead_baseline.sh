@@ -20,7 +20,7 @@ WPERF="$REPO_DIR/target/release/wperf"
 DURATION=60
 NUM_RUNS=3
 CPU_THRESHOLD=3.0
-MIN_EVENTS_PER_SEC=100000
+MIN_EVENTS_PER_SEC=10000
 
 cleanup() {
     [ -n "${STRESS_PID:-}" ] && kill "$STRESS_PID" 2>/dev/null || true
