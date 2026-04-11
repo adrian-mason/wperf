@@ -29,5 +29,12 @@
 - [ ] **Tests**: new/changed code has adequate test coverage
 - [ ] **CI green**: all required checks pass
 
+## Runtime Evidence
+<!-- Required for E2E validation and gate-critical PRs (Oracle Directive 5).
+     Paste actual command output showing the test ran and produced expected results.
+     For BPF/kernel PRs: probe attach confirmation, event counts, relevant excerpts.
+     For gate-critical PRs: evidence must demonstrate the gate claim is satisfied.
+     For non-E2E PRs: write "N/A — not E2E or gate-critical" -->
+
 ## Test Plan
 <!-- How was this tested? -->
