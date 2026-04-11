@@ -126,19 +126,10 @@ MATCHING_KNOTS=$(jq --argjson t1 "$TID1" --argjson t2 "$TID2" \
 echo "knots containing both TIDs ($TID1, $TID2): $MATCHING_KNOTS"
 
 if [ "$MATCHING_KNOTS" -lt 1 ]; then
-    echo "WARNING: no knot contains both workload TIDs — checking if either TID appears in any knot"
-    # Fallback: at least one TID in some knot (weaker but still meaningful)
-    ANY_TID_KNOTS=$(jq --argjson t1 "$TID1" --argjson t2 "$TID2" \
-        '[.knots[] | select((.members | index($t1)) or (.members | index($t2)))] | length' \
-        "$REPORT_FILE")
-    echo "knots containing either TID: $ANY_TID_KNOTS"
-    if [ "$ANY_TID_KNOTS" -lt 1 ]; then
-        echo "FAIL: workload TIDs not found in any knot" >&2
-        echo "--- all knots ---"
-        jq '.knots' "$REPORT_FILE"
-        exit 1
-    fi
-    echo "WARN: only partial TID match — workload threads may have been folded into a larger SCC"
+    echo "FAIL: no knot contains both workload TIDs ($TID1, $TID2)" >&2
+    echo "--- all knots ---"
+    jq '.knots' "$REPORT_FILE"
+    exit 1
 fi
 
 # Summary
