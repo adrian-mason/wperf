@@ -511,7 +511,7 @@ Key mutation targets: deletion of `path.insert`, modification of duration calcul
 
 To satisfy the overhead constraints in the Phase Exit Gates (§7.3), profiling overhead must be validated under automated, reproducible conditions:
 
-- **Workload:** `stress-ng --matrix 64` (or equivalent multi-threaded CPU/scheduler stressor) to generate >100K sched_switch events/sec
+- **Workload:** `stress-ng --matrix 64` (or equivalent multi-threaded CPU/scheduler stressor) to generate >10K sched_switch events/sec (excluding profiler self-observation; original 100K threshold included ~93% feedback-loop amplification from the profiler's own scheduling events)
 - **Measurement:** `wperf record` process CPU utilization via `pidstat -p <pid> 1` over a 60-second collection window
 - **Thresholds:** < 3% single-core equivalent CPU usage for base collection (Phase 1 gate); < 5% with user-stack collection enabled (Phase 3 gate)
 - **Environment:** Same virtme-ng kernel matrix as §6.6; overhead must meet threshold on all test kernels
