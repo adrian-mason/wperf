@@ -279,9 +279,13 @@ fn poll_ringbuf<W: std::io::Write + std::io::Seek>(
         if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
             break;
         }
-        let _ = ringbuf.poll(std::time::Duration::from_millis(100));
+        let prev_count = **count.borrow();
+        let _ = ringbuf.consume();
         if let Some(e) = write_err.borrow_mut().take() {
             return Err(RecordError::Io(e));
+        }
+        if **count.borrow() == prev_count {
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
     }
 
@@ -352,7 +356,7 @@ fn poll_perfarray<W: std::io::Write + std::io::Seek>(
         if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
             break;
         }
-        let _ = perf.poll(std::time::Duration::from_millis(100));
+        let _ = perf.poll(std::time::Duration::from_millis(500));
 
         for event in pending.borrow_mut().drain(..) {
             reorder.push(event, &mut write_cb);
