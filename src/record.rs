@@ -19,6 +19,12 @@ use std::sync::atomic::Ordering;
 
 use crate::cli::RecordArgs;
 
+#[cfg(feature = "bpf")]
+#[allow(unused_imports, clippy::all, clippy::pedantic)]
+mod skel {
+    include!(concat!(env!("OUT_DIR"), "/wperf.skel.rs"));
+}
+
 /// Errors from the record subcommand.
 #[derive(Debug)]
 pub enum RecordError {
