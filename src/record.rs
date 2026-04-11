@@ -313,6 +313,17 @@ fn poll_perfarray<W: std::io::Write + std::io::Seek>(
         .map_err(|e| RecordError::Bpf(format!("perf buffer build: {e}")))?;
 
     let mut reorder = ReorderBuf::new();
+    let write_err: RefCell<Option<io::Error>> = RefCell::new(None);
+
+    let mut write_cb = |ev: &WperfEvent| {
+        if write_err.borrow().is_some() {
+            return;
+        }
+        match writer.write_event(ev) {
+            Ok(()) => *event_count += 1,
+            Err(e) => *write_err.borrow_mut() = Some(e),
+        }
+    };
 
     loop {
         if stop_requested.load(Ordering::Relaxed) {
@@ -324,18 +335,18 @@ fn poll_perfarray<W: std::io::Write + std::io::Seek>(
         let _ = perf.poll(std::time::Duration::from_millis(100));
 
         for event in pending.borrow_mut().drain(..) {
-            reorder.push(event, &mut |ev| {
-                let _ = writer.write_event(ev);
-                *event_count += 1;
-            });
+            reorder.push(event, &mut write_cb);
+        }
+        if let Some(e) = write_err.borrow_mut().take() {
+            return Err(RecordError::Io(e));
         }
     }
 
     // Final drain: flush reorder buffer.
-    reorder.drain(&mut |ev| {
-        let _ = writer.write_event(ev);
-        *event_count += 1;
-    });
+    reorder.drain(&mut write_cb);
+    if let Some(e) = write_err.borrow_mut().take() {
+        return Err(RecordError::Io(e));
+    }
 
     Ok(*lost_count.borrow())
 }
