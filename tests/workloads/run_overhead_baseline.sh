@@ -177,7 +177,7 @@ for RUN in $(seq 1 "$NUM_RUNS"); do
     # Get event count and drop count from wperf report
     REPORT="$("$WPERF" report "$TRACE_FILE" 2>/dev/null)"
     EVENT_COUNT=$(echo "$REPORT" | jq '.stats.events_read')
-    DROP_COUNT=$(echo "$REPORT" | jq '.stats.drop_count')
+    DROP_COUNT=$(echo "$REPORT" | jq '.health.drop_count // 0')
     EVENT_RATE=$((EVENT_COUNT / DURATION))
 
     echo "  events=$EVENT_COUNT ($EVENT_RATE/sec), drops=$DROP_COUNT"
