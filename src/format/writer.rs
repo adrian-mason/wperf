@@ -489,4 +489,52 @@ mod tests {
         assert_eq!(ec, Some(7));
         assert_eq!(dc, None);
     }
+
+    #[test]
+    fn write_event_raw_matches_write_event() {
+        let ev = make_event(42_000, EventType::Switch);
+
+        let mut buf1 = Cursor::new(Vec::new());
+        let mut w1 = WperfWriter::new(&mut buf1).unwrap();
+        w1.write_event(&ev).unwrap();
+        let buf1 = w1.finish(0).unwrap().clone().into_inner();
+
+        let mut buf2 = Cursor::new(Vec::new());
+        let mut w2 = WperfWriter::new(&mut buf2).unwrap();
+        w2.write_event_raw(&ev.to_bytes()).unwrap();
+        let buf2 = w2.finish(0).unwrap().clone().into_inner();
+
+        assert_eq!(buf1, buf2);
+    }
+
+    #[test]
+    fn write_event_raw_tracks_timestamps() {
+        let buf = Cursor::new(Vec::new());
+        let mut w = WperfWriter::new(buf).unwrap();
+
+        w.write_event_raw(&make_event(100, EventType::Switch).to_bytes())
+            .unwrap();
+        w.write_event_raw(&make_event(300, EventType::Wakeup).to_bytes())
+            .unwrap();
+        w.write_event_raw(&make_event(200, EventType::Switch).to_bytes())
+            .unwrap();
+
+        assert_eq!(w.start_timestamp_ns, Some(100));
+        assert_eq!(w.end_timestamp_ns, 300);
+        assert_eq!(w.event_count(), 3);
+    }
+
+    #[test]
+    fn write_event_raw_crash_recovery() {
+        let buf = Cursor::new(Vec::new());
+        let mut w = WperfWriter::new(buf).unwrap();
+
+        for i in 0..8192 {
+            let ev = make_event(i * 1000, EventType::Switch);
+            w.write_event_raw(&ev.to_bytes()).unwrap();
+        }
+
+        let expected_offset = HEADER_SIZE as u64 + 8192 * (TLV_HEADER_SIZE + EVENT_SIZE) as u64;
+        assert_eq!(w.header.data_section_end_offset, expected_offset);
+    }
 }
