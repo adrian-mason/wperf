@@ -148,6 +148,13 @@ fn record_impl(args: &RecordArgs, stop_requested: &Arc<AtomicBool>) -> Result<()
         }
     }
 
+    open_skel
+        .maps
+        .bss_data
+        .as_mut()
+        .ok_or_else(|| RecordError::Bpf("BSS data not available".into()))?
+        .self_tgid = std::process::id();
+
     if features.transport == TransportMode::RingBuf {
         open_skel
             .maps

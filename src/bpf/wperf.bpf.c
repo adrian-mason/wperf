@@ -58,6 +58,11 @@ struct {
  * Read by user-space at end of recording. */
 __u64 drop_counter = 0;
 
+/* BSS: wperf's own TGID, set by user-space before attach().
+ * Probes skip events involving this TGID to prevent observer-effect
+ * feedback loops (wperf's sleep/wake cycles triggering its own probes). */
+__u32 self_tgid = 0;
+
 /* --------------------------------------------------------------------------
  * Buffer abstraction: vendored from libbpf-tools compat.bpf.h
  * --------------------------------------------------------------------------
@@ -96,6 +101,9 @@ int BPF_PROG(handle_sched_switch_btf,
 {
 	struct wperf_event *e;
 
+	if (self_tgid && (prev->tgid == self_tgid || next->tgid == self_tgid))
+		return 0;
+
 	e = reserve_buf(sizeof(*e));
 	if (!e)
 		return 0;
@@ -126,6 +134,10 @@ int BPF_PROG(handle_sched_wakeup_btf,
 	     struct task_struct *p)
 {
 	struct wperf_event *e;
+
+	if (self_tgid && (p->tgid == self_tgid ||
+			  (__u32)(bpf_get_current_pid_tgid() >> 32) == self_tgid))
+		return 0;
 
 	e = reserve_buf(sizeof(*e));
 	if (!e)
@@ -166,6 +178,10 @@ int BPF_PROG(handle_sched_switch_raw,
 {
 	struct wperf_event *e;
 
+	if (self_tgid && (BPF_CORE_READ(prev, tgid) == self_tgid ||
+			  BPF_CORE_READ(next, tgid) == self_tgid))
+		return 0;
+
 	e = reserve_buf(sizeof(*e));
 	if (!e)
 		return 0;
@@ -193,6 +209,10 @@ int BPF_PROG(handle_sched_wakeup_raw,
 	     struct task_struct *p)
 {
 	struct wperf_event *e;
+
+	if (self_tgid && (BPF_CORE_READ(p, tgid) == self_tgid ||
+			  (__u32)(bpf_get_current_pid_tgid() >> 32) == self_tgid))
+		return 0;
 
 	e = reserve_buf(sizeof(*e));
 	if (!e)
