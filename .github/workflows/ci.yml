@@ -119,7 +119,7 @@ jobs:
 
       - name: Run cargo-mutants
         continue-on-error: true
-        run: cargo mutants --timeout=300 -j 2
+        run: cargo mutants --timeout=120 -j 4
 
       - name: Upload mutation report
         if: always()
