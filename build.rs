@@ -41,7 +41,7 @@ fn skeleton_build() {
         .ok()
         .filter(|o| o.status.success());
 
-    if let Some(output) = generated {
+    if let Some(output) = generated.filter(|o| !o.stdout.is_empty()) {
         std::fs::write(&vmlinux_h, &output.stdout).expect("failed to write vmlinux.h");
     } else {
         std::fs::copy("src/bpf/vmlinux.h.vendored", &vmlinux_h)

@@ -114,7 +114,9 @@ fn record_impl(args: &RecordArgs, stop_requested: &Arc<AtomicBool>) -> Result<()
             TransportMode::PerfArray => {
                 let raw = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
                 if raw <= 0 {
-                    return Err(RecordError::Io(std::io::Error::last_os_error()));
+                    return Err(RecordError::Io(std::io::Error::other(
+                        "failed to retrieve system page size via sysconf",
+                    )));
                 }
                 let page_size: u32 = raw.try_into().expect("page size must fit in u32");
                 let pages = size.div_ceil(page_size).next_power_of_two();
