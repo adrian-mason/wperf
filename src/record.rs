@@ -112,10 +112,13 @@ fn record_impl(args: &RecordArgs, stop_requested: &Arc<AtomicBool>) -> Result<()
         Some(size) => match features.transport {
             TransportMode::RingBuf => TransportConfig::ringbuf(size),
             TransportMode::PerfArray => {
-                let page_size: u32 = unsafe { libc::sysconf(libc::_SC_PAGESIZE) }
-                    .try_into()
-                    .expect("page size must fit in u32");
-                TransportConfig::perfarray(size / page_size)
+                let raw = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+                if raw <= 0 {
+                    return Err(RecordError::Io(std::io::Error::last_os_error()));
+                }
+                let page_size: u32 = raw.try_into().expect("page size must fit in u32");
+                let pages = (size / page_size).next_power_of_two();
+                TransportConfig::perfarray(pages)
             }
         },
         None => TransportConfig::from_mode(features.transport),
