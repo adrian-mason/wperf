@@ -22,6 +22,8 @@ fn skeleton_build() {
     use std::process::Command;
 
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR not set"));
+    let manifest_dir =
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
 
     // vmlinux.h: try bpftool (exact kernel match), fall back to vendored copy.
     // Vendored copy at src/bpf/vmlinux.h.vendored (renamed to avoid clang
@@ -44,7 +46,7 @@ fn skeleton_build() {
     if let Some(output) = generated.filter(|o| !o.stdout.is_empty()) {
         std::fs::write(&vmlinux_h, &output.stdout).expect("failed to write vmlinux.h");
     } else {
-        std::fs::copy("src/bpf/vmlinux.h.vendored", &vmlinux_h)
+        std::fs::copy(manifest_dir.join("src/bpf/vmlinux.h.vendored"), &vmlinux_h)
             .expect("failed to copy vendored vmlinux.h — check src/bpf/vmlinux.h.vendored exists");
     }
 
@@ -57,7 +59,10 @@ fn skeleton_build() {
             "-I",
             out_dir.to_str().expect("OUT_DIR not UTF-8"),
             "-I",
-            "src/bpf",
+            manifest_dir
+                .join("src/bpf")
+                .to_str()
+                .expect("CARGO_MANIFEST_DIR not UTF-8"),
         ])
         .build_and_generate(&skel_path)
         .expect("failed to build and generate BPF skeleton");
