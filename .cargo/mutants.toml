@@ -22,5 +22,4 @@ exclude_re = [
     "poll_ringbuf",
     "poll_perfarray",
     "global_tgid",
-    "register_signal_handlers",
 ]
