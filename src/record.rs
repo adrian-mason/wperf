@@ -117,7 +117,7 @@ fn record_impl(args: &RecordArgs, stop_requested: &Arc<AtomicBool>) -> Result<()
                     return Err(RecordError::Io(std::io::Error::last_os_error()));
                 }
                 let page_size: u32 = raw.try_into().expect("page size must fit in u32");
-                let pages = (size / page_size).next_power_of_two();
+                let pages = size.div_ceil(page_size).next_power_of_two();
                 TransportConfig::perfarray(pages)
             }
         },
