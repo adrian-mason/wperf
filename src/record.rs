@@ -93,6 +93,7 @@ fn register_signal_handlers(stop_requested: &Arc<AtomicBool>) -> Result<(), Reco
 }
 
 #[cfg(feature = "bpf")]
+#[allow(clippy::too_many_lines)]
 fn record_impl(args: &RecordArgs, stop_requested: &Arc<AtomicBool>) -> Result<(), RecordError> {
     use std::fs::File;
     use std::io::BufWriter;
@@ -106,14 +107,20 @@ fn record_impl(args: &RecordArgs, stop_requested: &Arc<AtomicBool>) -> Result<()
 
     // --- Step 1: Feature probing ---
     let paths = ProbePaths::default();
-    let features = probe::probe_all(&paths)
-        .map_err(|e| RecordError::Probe(e.to_string()))?;
+    let features = probe::probe_all(&paths).map_err(|e| RecordError::Probe(e.to_string()))?;
     let transport_config = match args.buffer_size {
         Some(size) => match features.transport {
             TransportMode::RingBuf => TransportConfig::ringbuf(size),
             TransportMode::PerfArray => {
-                let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u32;
-                TransportConfig::perfarray(size / page_size)
+                let raw = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+                if raw <= 0 {
+                    return Err(RecordError::Io(std::io::Error::other(
+                        "failed to retrieve system page size via sysconf",
+                    )));
+                }
+                let page_size: u32 = raw.try_into().expect("page size must fit in u32");
+                let pages = size.div_ceil(page_size).next_power_of_two();
+                TransportConfig::perfarray(pages)
             }
         },
         None => TransportConfig::from_mode(features.transport),
@@ -157,7 +164,10 @@ fn record_impl(args: &RecordArgs, stop_requested: &Arc<AtomicBool>) -> Result<()
         .attach()
         .map_err(|e| RecordError::Bpf(format!("skeleton attach: {e}")))?;
 
-    eprintln!("wperf: probes attached, recording to {}", args.output.display());
+    eprintln!(
+        "wperf: probes attached, recording to {}",
+        args.output.display()
+    );
 
     // --- Step 3: Create writer ---
     let file = File::create(&args.output)?;
@@ -166,7 +176,9 @@ fn record_impl(args: &RecordArgs, stop_requested: &Arc<AtomicBool>) -> Result<()
 
     // --- Step 4: Poll loop ---
     let start = Instant::now();
-    let deadline = args.duration.map(|d| start + std::time::Duration::from_secs_f64(d));
+    let deadline = args
+        .duration
+        .map(|d| start + std::time::Duration::from_secs_f64(d));
     let mut event_count: u64 = 0;
     let mut transport_lost: u64 = 0;
 
@@ -202,7 +214,9 @@ fn record_impl(args: &RecordArgs, stop_requested: &Arc<AtomicBool>) -> Result<()
     let drop_count = bpf_drops + transport_lost;
 
     let inner = writer.finish(drop_count)?;
-    inner.into_inner().map_err(|e| RecordError::Io(e.into_error()))?;
+    inner
+        .into_inner()
+        .map_err(|e| RecordError::Io(e.into_error()))?;
 
     let elapsed = start.elapsed();
     eprintln!(
@@ -276,7 +290,7 @@ fn poll_ringbuf<W: std::io::Write + std::io::Seek>(
 
 /// Perfarray poll loop: events arrive per-CPU, reordered via `ReorderBuf`.
 ///
-/// PerfBuffer callbacks collect events into a shared Vec, which the main loop
+/// `PerfBuffer` callbacks collect events into a shared Vec, which the main loop
 /// drains through the reorder buffer into the writer.
 #[cfg(feature = "bpf")]
 fn poll_perfarray<W: std::io::Write + std::io::Seek>(
@@ -360,7 +374,6 @@ fn record_impl(_args: &RecordArgs, _stop_requested: &Arc<AtomicBool>) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn signal_handler_registration_succeeds() {
@@ -430,7 +443,7 @@ mod tests {
     #[test]
     fn record_without_bpf_returns_error() {
         let args = RecordArgs {
-            output: PathBuf::from("/tmp/test.wperf"),
+            output: std::path::PathBuf::from("/tmp/test.wperf"),
             duration: None,
             buffer_size: None,
         };
