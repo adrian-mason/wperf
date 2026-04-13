@@ -96,18 +96,18 @@ fn register_signal_handlers(stop_requested: &Arc<AtomicBool>) -> Result<(), Reco
 ///
 /// BPF probes see the init-namespace TGID, which differs from
 /// `std::process::id()` inside PID namespaces (containers). Reads
-/// `/proc/self/status` NSpid field (first value = outermost TGID).
-/// Falls back to `std::process::id()` if NSpid is unavailable.
+/// `/proc/self/status` `NSpid` field (first value = outermost TGID).
+/// Falls back to `std::process::id()` if `NSpid` is unavailable.
 #[cfg(feature = "bpf")]
 fn global_tgid() -> u32 {
     if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
         for line in status.lines() {
-            if let Some(rest) = line.strip_prefix("NSpid:") {
-                if let Some(first) = rest.split_whitespace().next() {
-                    if let Ok(pid) = first.parse::<u32>() {
-                        return pid;
-                    }
-                }
+            if let Some(first) = line
+                .strip_prefix("NSpid:")
+                .and_then(|rest| rest.split_whitespace().next())
+                && let Ok(pid) = first.parse::<u32>()
+            {
+                return pid;
             }
         }
     }
