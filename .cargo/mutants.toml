@@ -1,16 +1,16 @@
 # cargo-mutants configuration
 # See https://mutants.rs/mutants-toml.html
 
-# Exclude Tier 2/3 BPF probe functions from mutation testing.
+# Exclude BPF-gated functions from mutation testing.
 #
-# These functions exist in two versions via cfg(feature = "bpf"):
-# - The real implementations use libbpf-rs syscalls (compiled only with --features bpf)
-# - The stubs return hardcoded fallback values (compiled in default build)
+# These functions require root + BPF privileges to test (libbpf-rs syscalls,
+# kernel tracepoints). CI runs cargo-mutants without --features bpf, so
+# BPF-gated code paths produce false MISSED results.
 #
-# Problem: cargo-mutants runs against the default build. The bpf-gated versions
-# are compiled out by cfg, so body-replacement mutations are invisible to tests
-# (false MISSED). Excluding by function name also removes the stub mutations,
-# but those are trivial one-liners already covered by integration tests.
+# Categories:
+# 1. Probe functions (cfg(feature = "bpf") stubs vs real implementations)
+# 2. Record pipeline (record_impl, poll_ringbuf, poll_perfarray, global_tgid)
+#    — require BPF skeleton attach + kernel tracepoints
 #
 # Re-evaluate when adding --features bpf to the mutation testing job.
 exclude_re = [
@@ -18,4 +18,8 @@ exclude_re = [
     "probe_bpf_loop",
     "probe_tp_btf",
     "probe_fentry",
+    "record_impl",
+    "poll_ringbuf",
+    "poll_perfarray",
+    "global_tgid",
 ]
