@@ -62,20 +62,21 @@ impl<W: Write + Seek> WperfWriter<W> {
         }
         self.end_timestamp_ns = self.end_timestamp_ns.max(event.timestamp_ns);
 
-        // TLV header
-        self.inner.write_all(&[REC_TYPE_SCHED_EVENT])?;
-        #[allow(clippy::cast_possible_truncation)] // EVENT_SIZE is 40, always fits u32
-        self.inner.write_all(&(EVENT_SIZE as u32).to_le_bytes())?;
-
-        // Event payload
-        event.write_to(&mut self.inner)?;
+        // TLV header + event payload in a single write_all (45 bytes).
+        let mut record = [0u8; TLV_HEADER_SIZE + EVENT_SIZE];
+        record[0] = REC_TYPE_SCHED_EVENT;
+        #[allow(clippy::cast_possible_truncation)]
+        record[1..5].copy_from_slice(&(EVENT_SIZE as u32).to_le_bytes());
+        record[5..].copy_from_slice(&event.to_bytes());
+        self.inner.write_all(&record)?;
 
         self.event_count += 1;
 
         // Periodically update data_section_end_offset for crash recovery.
-        // Every 1024 events, flush the current write position into the header
-        // so a crash-recovery reader knows how far valid data extends.
-        if self.event_count.is_multiple_of(1024) {
+        // Every 8192 events (~368 KiB of TLV data), flush the current write
+        // position into the header so a crash-recovery reader knows how far
+        // valid data extends. Spec §4.4 requires no granularity SLA.
+        if self.event_count.is_multiple_of(8192) {
             self.update_data_offset()?;
         }
 
@@ -126,6 +127,34 @@ impl<W: Write + Seek> WperfWriter<W> {
         self.inner.seek(SeekFrom::Start(final_pos))?;
 
         Ok(self.inner)
+    }
+
+    /// Write a raw event (already in wire format) wrapped in a TLV record.
+    ///
+    /// Skips the `from_bytes`/`to_bytes` roundtrip — the caller guarantees
+    /// `raw` is exactly `EVENT_SIZE` bytes in the correct wire layout.
+    pub fn write_event_raw(&mut self, raw: &[u8; EVENT_SIZE]) -> io::Result<()> {
+        // Extract timestamp (bytes 0..8, little-endian u64) without full parse.
+        let ts = u64::from_le_bytes(raw[0..8].try_into().unwrap());
+        if self.start_timestamp_ns.is_none() {
+            self.start_timestamp_ns = Some(ts);
+        }
+        self.end_timestamp_ns = self.end_timestamp_ns.max(ts);
+
+        let mut record = [0u8; TLV_HEADER_SIZE + EVENT_SIZE];
+        record[0] = REC_TYPE_SCHED_EVENT;
+        #[allow(clippy::cast_possible_truncation)]
+        record[1..5].copy_from_slice(&(EVENT_SIZE as u32).to_le_bytes());
+        record[5..].copy_from_slice(raw);
+        self.inner.write_all(&record)?;
+
+        self.event_count += 1;
+
+        if self.event_count.is_multiple_of(8192) {
+            self.update_data_offset()?;
+        }
+
+        Ok(())
     }
 
     /// Number of events written so far.
@@ -349,14 +378,14 @@ mod tests {
         let buf = Cursor::new(Vec::new());
         let mut w = WperfWriter::new(buf).unwrap();
 
-        // Write 1024 events to trigger one crash-recovery update
-        for i in 0..1024 {
+        // Write 8192 events to trigger one crash-recovery update
+        for i in 0..8192 {
             let ev = make_event(i * 1000, EventType::Switch);
             w.write_event(&ev).unwrap();
         }
 
-        // After 1024 events, data_section_end_offset should be updated
-        let expected_offset = HEADER_SIZE as u64 + 1024 * (TLV_HEADER_SIZE + EVENT_SIZE) as u64;
+        // After 8192 events, data_section_end_offset should be updated
+        let expected_offset = HEADER_SIZE as u64 + 8192 * (TLV_HEADER_SIZE + EVENT_SIZE) as u64;
         assert_eq!(w.header.data_section_end_offset, expected_offset);
     }
 
@@ -459,5 +488,53 @@ mod tests {
         let (ec, dc) = parse_metadata(&buf);
         assert_eq!(ec, Some(7));
         assert_eq!(dc, None);
+    }
+
+    #[test]
+    fn write_event_raw_matches_write_event() {
+        let ev = make_event(42_000, EventType::Switch);
+
+        let mut buf1 = Cursor::new(Vec::new());
+        let mut w1 = WperfWriter::new(&mut buf1).unwrap();
+        w1.write_event(&ev).unwrap();
+        let buf1 = w1.finish(0).unwrap().clone().into_inner();
+
+        let mut buf2 = Cursor::new(Vec::new());
+        let mut w2 = WperfWriter::new(&mut buf2).unwrap();
+        w2.write_event_raw(&ev.to_bytes()).unwrap();
+        let buf2 = w2.finish(0).unwrap().clone().into_inner();
+
+        assert_eq!(buf1, buf2);
+    }
+
+    #[test]
+    fn write_event_raw_tracks_timestamps() {
+        let buf = Cursor::new(Vec::new());
+        let mut w = WperfWriter::new(buf).unwrap();
+
+        w.write_event_raw(&make_event(100, EventType::Switch).to_bytes())
+            .unwrap();
+        w.write_event_raw(&make_event(300, EventType::Wakeup).to_bytes())
+            .unwrap();
+        w.write_event_raw(&make_event(200, EventType::Switch).to_bytes())
+            .unwrap();
+
+        assert_eq!(w.start_timestamp_ns, Some(100));
+        assert_eq!(w.end_timestamp_ns, 300);
+        assert_eq!(w.event_count(), 3);
+    }
+
+    #[test]
+    fn write_event_raw_crash_recovery() {
+        let buf = Cursor::new(Vec::new());
+        let mut w = WperfWriter::new(buf).unwrap();
+
+        for i in 0..8192 {
+            let ev = make_event(i * 1000, EventType::Switch);
+            w.write_event_raw(&ev.to_bytes()).unwrap();
+        }
+
+        let expected_offset = HEADER_SIZE as u64 + 8192 * (TLV_HEADER_SIZE + EVENT_SIZE) as u64;
+        assert_eq!(w.header.data_section_end_offset, expected_offset);
     }
 }
