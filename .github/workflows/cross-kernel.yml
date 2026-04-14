@@ -1,0 +1,59 @@
+name: Cross-Kernel E2E
+
+on:
+  push:
+    branches: [main, "test/*"]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cross-kernel-e2e:
+    name: E2E (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+          - os: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libelf-dev zlib1g-dev gcc jq linux-tools-common
+
+      - name: Install bpftool
+        run: |
+          sudo apt-get install -y "linux-tools-$(uname -r)" || true
+          if ! command -v bpftool &>/dev/null; then
+            echo "WARNING: bpftool not available via linux-tools, trying bpftools package"
+            sudo apt-get install -y bpftool || true
+          fi
+          bpftool version || echo "bpftool unavailable — vendored vmlinux.h will be used"
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: 1.94.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v0-rust-${{ matrix.os }}
+
+      - name: BPF capability check
+        run: |
+          uname -r
+          cat /etc/os-release | grep PRETTY_NAME || true
+          test -f /sys/kernel/btf/vmlinux && echo "BTF: available" || echo "BTF: unavailable"
+          sudo bpftool prog list 2>/dev/null | head -5 || echo "bpftool prog list failed"
+
+      - name: Build wperf (BPF)
+        run: cargo build --release --features bpf
+
+      - name: Run cross-kernel E2E
+        run: sudo -E ./tests/workloads/run_cross_kernel_e2e.sh
