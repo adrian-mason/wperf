@@ -58,6 +58,10 @@ struct {
  * Read by user-space at end of recording. */
 __u64 drop_counter = 0;
 
+/* BSS: enable futex tracing (Phase 2a). Defaults to false; user-space
+ * sets to true between open() and load() when futex annotation is wanted. */
+const volatile bool enable_futex_tracing = false;
+
 /* BSS: wperf's own TGID, set by user-space before attach().
  * Probes skip events involving this TGID to prevent observer-effect
  * feedback loops (wperf's sleep/wake cycles triggering its own probes). */
@@ -228,6 +232,62 @@ int BPF_PROG(handle_sched_wakeup_raw,
 	e->tid = (__u32)pid_tgid;
 	e->prev_tid = e->tid;
 	e->prev_pid = e->pid;
+
+	submit_buf(ctx, e, sizeof(*e));
+	return 0;
+}
+
+/* --------------------------------------------------------------------------
+ * sys_enter_futex tracepoint (Phase 2a — wait cause annotation)
+ *
+ * Standard tracepoint (not tp_btf/raw_tp). Stable ABI across all 4.18+
+ * kernels — single handler, no dual-variant needed.
+ * Gated by const volatile bool enable_futex_tracing.
+ *
+ * Captures only wait-side operations (FUTEX_WAIT, FUTEX_WAIT_BITSET,
+ * FUTEX_LOCK_PI). Ignores FUTEX_WAKE and other non-blocking ops.
+ *
+ * Field mapping in wperf_event:
+ *   prev_tid  = uaddr lower 32 bits
+ *   next_tid  = uaddr upper 32 bits
+ *   flags     = futex op (masked by FUTEX_CMD_MASK)
+ * -------------------------------------------------------------------------- */
+
+SEC("tracepoint/syscalls/sys_enter_futex")
+int handle_sys_enter_futex(struct trace_event_raw_sys_enter *ctx)
+{
+	struct wperf_event *e;
+
+	if (!enable_futex_tracing)
+		return 0;
+
+	__u64 pid_tgid = bpf_get_current_pid_tgid();
+	__u32 tgid = (__u32)(pid_tgid >> 32);
+
+	if (self_tgid && tgid == self_tgid)
+		return 0;
+
+	__u32 op = (__u32)ctx->args[1] & FUTEX_CMD_MASK;
+	if (op != FUTEX_WAIT && op != FUTEX_WAIT_BITSET && op != FUTEX_LOCK_PI)
+		return 0;
+
+	e = reserve_buf(sizeof(*e));
+	if (!e)
+		return 0;
+
+	fill_timestamp_and_cpu(e);
+	e->event_type = WPERF_EVENT_FUTEX_WAIT;
+	e->pid = tgid;
+	e->tid = (__u32)pid_tgid;
+
+	__u64 uaddr = (__u64)ctx->args[0];
+	e->prev_tid = (__u32)uaddr;
+	e->next_tid = (__u32)(uaddr >> 32);
+
+	e->prev_pid = 0;
+	e->next_pid = 0;
+	e->prev_state = 0;
+	e->flags = op;
 
 	submit_buf(ctx, e, sizeof(*e));
 	return 0;

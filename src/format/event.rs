@@ -23,6 +23,13 @@ use std::io::{self, Read, Write};
 /// Event size in bytes. Naturally aligned, no padding waste.
 pub const EVENT_SIZE: usize = 40;
 
+/// Futex operation constants (matching BPF-side definitions from linux/futex.h).
+pub mod futex_op {
+    pub const FUTEX_WAIT: u32 = 0;
+    pub const FUTEX_LOCK_PI: u32 = 6;
+    pub const FUTEX_WAIT_BITSET: u32 = 9;
+}
+
 /// Event type discriminants — must match BPF `enum wperf_event_type`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -31,6 +38,7 @@ pub enum EventType {
     Wakeup = 2,
     WakeupNew = 3,
     Exit = 4,
+    FutexWait = 5,
 }
 
 impl EventType {
@@ -40,6 +48,7 @@ impl EventType {
             2 => Some(Self::Wakeup),
             3 => Some(Self::WakeupNew),
             4 => Some(Self::Exit),
+            5 => Some(Self::FutexWait),
             _ => None,
         }
     }
@@ -120,6 +129,18 @@ impl WperfEvent {
     pub fn event_type_enum(&self) -> Option<EventType> {
         EventType::from_u8(self.event_type)
     }
+
+    /// Futex user address (64-bit). Only meaningful for `FutexWait` events.
+    /// Stored as: `prev_tid` = lower 32 bits, `next_tid` = upper 32 bits.
+    pub fn futex_uaddr(&self) -> u64 {
+        u64::from(self.next_tid) << 32 | u64::from(self.prev_tid)
+    }
+
+    /// Futex operation (after `FUTEX_CMD_MASK`). Only meaningful for `FutexWait` events.
+    /// Stored in `flags` field.
+    pub fn futex_op(&self) -> u32 {
+        self.flags
+    }
 }
 
 #[cfg(test)]
@@ -183,18 +204,60 @@ mod tests {
         assert_eq!(ev, parsed);
     }
 
+    fn sample_futex_event() -> WperfEvent {
+        WperfEvent {
+            timestamp_ns: 1_000_100_000,
+            pid: 100,
+            tid: 101,
+            prev_tid: 0xDEAD_BEEFu32, // uaddr lower 32
+            next_tid: 0x0000_7FFEu32,  // uaddr upper 32
+            prev_pid: 0,
+            next_pid: 0,
+            cpu: 2,
+            event_type: EventType::FutexWait as u8,
+            prev_state: 0,
+            flags: futex_op::FUTEX_WAIT,
+        }
+    }
+
     #[test]
     fn event_type_enum_known() {
         assert_eq!(EventType::from_u8(1), Some(EventType::Switch));
         assert_eq!(EventType::from_u8(2), Some(EventType::Wakeup));
         assert_eq!(EventType::from_u8(3), Some(EventType::WakeupNew));
         assert_eq!(EventType::from_u8(4), Some(EventType::Exit));
+        assert_eq!(EventType::from_u8(5), Some(EventType::FutexWait));
     }
 
     #[test]
     fn event_type_enum_unknown() {
         assert_eq!(EventType::from_u8(0), None);
         assert_eq!(EventType::from_u8(255), None);
+    }
+
+    #[test]
+    fn futex_event_roundtrip() {
+        let ev = sample_futex_event();
+        let bytes = ev.to_bytes();
+        let parsed = WperfEvent::from_bytes(&bytes);
+        assert_eq!(ev, parsed);
+        assert_eq!(parsed.event_type_enum(), Some(EventType::FutexWait));
+    }
+
+    #[test]
+    fn futex_uaddr_accessor() {
+        let ev = sample_futex_event();
+        assert_eq!(ev.futex_uaddr(), 0x0000_7FFE_DEAD_BEEFu64);
+    }
+
+    #[test]
+    fn futex_op_accessor() {
+        let ev = sample_futex_event();
+        assert_eq!(ev.futex_op(), futex_op::FUTEX_WAIT);
+
+        let mut ev2 = ev;
+        ev2.flags = futex_op::FUTEX_LOCK_PI;
+        assert_eq!(ev2.futex_op(), futex_op::FUTEX_LOCK_PI);
     }
 
     #[test]
