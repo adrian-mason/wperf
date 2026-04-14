@@ -28,6 +28,7 @@ pub mod futex_op {
     pub const FUTEX_WAIT: u32 = 0;
     pub const FUTEX_LOCK_PI: u32 = 6;
     pub const FUTEX_WAIT_BITSET: u32 = 9;
+    pub const FUTEX_WAIT_REQUEUE_PI: u32 = 11;
 }
 
 /// Event type discriminants — must match BPF `enum wperf_event_type`.

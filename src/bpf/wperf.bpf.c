@@ -58,7 +58,7 @@ struct {
  * Read by user-space at end of recording. */
 __u64 drop_counter = 0;
 
-/* BSS: enable futex tracing (Phase 2a). Defaults to false; user-space
+/* RODATA: enable futex tracing (Phase 2a). Defaults to false; user-space
  * sets to true between open() and load() when futex annotation is wanted. */
 const volatile bool enable_futex_tracing = false;
 
@@ -268,7 +268,8 @@ int handle_sys_enter_futex(struct trace_event_raw_sys_enter *ctx)
 		return 0;
 
 	__u32 op = (__u32)ctx->args[1] & FUTEX_CMD_MASK;
-	if (op != FUTEX_WAIT && op != FUTEX_WAIT_BITSET && op != FUTEX_LOCK_PI)
+	if (op != FUTEX_WAIT && op != FUTEX_WAIT_BITSET &&
+	    op != FUTEX_LOCK_PI && op != FUTEX_WAIT_REQUEUE_PI)
 		return 0;
 
 	e = reserve_buf(sizeof(*e));

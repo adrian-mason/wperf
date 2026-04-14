@@ -28,10 +28,11 @@ enum wperf_event_type {
 };
 
 /* Futex operation constants (from linux/futex.h). */
-#define FUTEX_WAIT          0
-#define FUTEX_LOCK_PI       6
-#define FUTEX_WAIT_BITSET   9
-#define FUTEX_CMD_MASK      0x7f
+#define FUTEX_WAIT              0
+#define FUTEX_LOCK_PI           6
+#define FUTEX_WAIT_BITSET       9
+#define FUTEX_WAIT_REQUEUE_PI  11
+#define FUTEX_CMD_MASK         0x7f
 
 /*
  * Futex event field mapping (reuses 40-byte wperf_event struct):
