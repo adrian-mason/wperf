@@ -92,6 +92,28 @@ fn register_signal_handlers(stop_requested: &Arc<AtomicBool>) -> Result<(), Reco
     Ok(())
 }
 
+/// Return the global (init-namespace) TGID for the current process.
+///
+/// BPF probes see the init-namespace TGID, which differs from
+/// `std::process::id()` inside PID namespaces (containers). Reads
+/// `/proc/self/status` `NSpid` field (first value = outermost TGID).
+/// Falls back to `std::process::id()` if `NSpid` is unavailable.
+#[cfg(feature = "bpf")]
+fn global_tgid() -> u32 {
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        for line in status.lines() {
+            if let Some(first) = line
+                .strip_prefix("NSpid:")
+                .and_then(|rest| rest.split_whitespace().next())
+                && let Ok(pid) = first.parse::<u32>()
+            {
+                return pid;
+            }
+        }
+    }
+    std::process::id()
+}
+
 #[cfg(feature = "bpf")]
 #[allow(clippy::too_many_lines)]
 fn record_impl(args: &RecordArgs, stop_requested: &Arc<AtomicBool>) -> Result<(), RecordError> {
@@ -148,6 +170,13 @@ fn record_impl(args: &RecordArgs, stop_requested: &Arc<AtomicBool>) -> Result<()
         }
     }
 
+    open_skel
+        .maps
+        .bss_data
+        .as_mut()
+        .ok_or_else(|| RecordError::Bpf("BSS data not available".into()))?
+        .self_tgid = global_tgid();
+
     if features.transport == TransportMode::RingBuf {
         open_skel
             .maps
@@ -171,7 +200,7 @@ fn record_impl(args: &RecordArgs, stop_requested: &Arc<AtomicBool>) -> Result<()
 
     // --- Step 3: Create writer ---
     let file = File::create(&args.output)?;
-    let buf_writer = BufWriter::new(file);
+    let buf_writer = BufWriter::with_capacity(1024 * 1024, file);
     let mut writer = WperfWriter::new(buf_writer)?;
 
     // --- Step 4: Poll loop ---
@@ -239,7 +268,7 @@ fn poll_ringbuf<W: std::io::Write + std::io::Seek>(
     use std::cell::RefCell;
     use std::sync::atomic::Ordering;
 
-    use crate::format::event::{EVENT_SIZE, WperfEvent};
+    use crate::format::event::EVENT_SIZE;
 
     let writer = RefCell::new(writer);
     let count = RefCell::new(event_count);
@@ -251,10 +280,9 @@ fn poll_ringbuf<W: std::io::Write + std::io::Seek>(
             if data.len() < EVENT_SIZE {
                 return 0;
             }
-            let buf: &[u8; EVENT_SIZE] = data[..EVENT_SIZE].try_into().unwrap();
-            let event = WperfEvent::from_bytes(buf);
+            let raw: &[u8; EVENT_SIZE] = data[..EVENT_SIZE].try_into().unwrap();
             let mut w = writer.borrow_mut();
-            if let Err(e) = w.write_event(&event) {
+            if let Err(e) = w.write_event_raw(raw) {
                 *write_err.borrow_mut() = Some(e);
                 return -1;
             }
@@ -273,9 +301,13 @@ fn poll_ringbuf<W: std::io::Write + std::io::Seek>(
         if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
             break;
         }
-        let _ = ringbuf.poll(std::time::Duration::from_millis(100));
+        let prev_count = **count.borrow();
+        let _ = ringbuf.consume();
         if let Some(e) = write_err.borrow_mut().take() {
             return Err(RecordError::Io(e));
+        }
+        if **count.borrow() == prev_count {
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
     }
 
@@ -346,7 +378,7 @@ fn poll_perfarray<W: std::io::Write + std::io::Seek>(
         if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
             break;
         }
-        let _ = perf.poll(std::time::Duration::from_millis(100));
+        let _ = perf.poll(std::time::Duration::from_millis(500));
 
         for event in pending.borrow_mut().drain(..) {
             reorder.push(event, &mut write_cb);
@@ -356,7 +388,13 @@ fn poll_perfarray<W: std::io::Write + std::io::Seek>(
         }
     }
 
-    // Final drain: flush reorder buffer.
+    // Final drain: flush pending events from last poll, then reorder buffer.
+    for event in pending.borrow_mut().drain(..) {
+        reorder.push(event, &mut write_cb);
+    }
+    if let Some(e) = write_err.borrow_mut().take() {
+        return Err(RecordError::Io(e));
+    }
     reorder.drain(&mut write_cb);
     if let Some(e) = write_err.borrow_mut().take() {
         return Err(RecordError::Io(e));

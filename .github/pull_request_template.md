@@ -27,7 +27,9 @@
 - [ ] **Deviations declared**: any spec drift is explicitly listed above with a doc update reference
 - [ ] **Code correctness**: logic, error handling, edge cases
 - [ ] **Tests**: new/changed code has adequate test coverage
-- [ ] **CI green**: all required checks pass
+- [ ] **CI green**: all required checks pass (Directive 6 — verify before issuing PASS)
+- [ ] **External reviews**: Gemini and all automated reviewer comments addressed (Directive 6)
+- [ ] **Owner approval**: @Adrian-Mason explicit merge authorization (Directive 6)
 
 ## Runtime Evidence
 <!-- Required for E2E validation and gate-critical PRs (Oracle Directive 5).
