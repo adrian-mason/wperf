@@ -210,7 +210,7 @@ mod tests {
             pid: 100,
             tid: 101,
             prev_tid: 0xDEAD_BEEFu32, // uaddr lower 32
-            next_tid: 0x0000_7FFEu32,  // uaddr upper 32
+            next_tid: 0x0000_7FFEu32, // uaddr upper 32
             prev_pid: 0,
             next_pid: 0,
             cpu: 2,
