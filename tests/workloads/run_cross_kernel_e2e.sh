@@ -22,7 +22,8 @@ WPERF="$REPO_DIR/target/release/wperf"
 DURATION=3
 
 cleanup() {
-    rm -f "$TRACE_FILE" "$REPORT_FILE" "$WORKLOAD_BIN"
+    [ -n "${WORKLOAD_PID:-}" ] && kill "$WORKLOAD_PID" 2>/dev/null || true
+    rm -f "$TRACE_FILE" "$REPORT_FILE" "$WORKLOAD_BIN" "${RECORD_STDERR:-}"
 }
 trap cleanup EXIT
 
@@ -38,6 +39,13 @@ if [ "$(id -u)" -ne 0 ]; then
     echo "ERROR: must run as root" >&2
     exit 1
 fi
+
+for cmd in gcc jq; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "ERROR: $cmd not found" >&2
+        exit 1
+    fi
+done
 
 if ! test -f /sys/kernel/btf/vmlinux; then
     echo "ERROR: /sys/kernel/btf/vmlinux not found — kernel lacks BTF support" >&2
@@ -91,7 +99,7 @@ echo "=== Cross-Kernel E2E: validating ==="
 EVENTS_READ=$(jq '.stats.events_read' "$REPORT_FILE")
 EDGE_COUNT=$(jq '.cascade.graph_metrics.edge_count' "$REPORT_FILE")
 INVARIANTS_OK=$(jq '.health.invariants_ok' "$REPORT_FILE")
-DROP_COUNT=$(jq '.stats.drop_count // 0' "$REPORT_FILE")
+DROP_COUNT=$(jq '.health.drop_count // 0' "$REPORT_FILE")
 
 echo "  events_read:    $EVENTS_READ"
 echo "  edge_count:     $EDGE_COUNT"
