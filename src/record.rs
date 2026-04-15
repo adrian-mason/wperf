@@ -177,6 +177,13 @@ fn record_impl(args: &RecordArgs, stop_requested: &Arc<AtomicBool>) -> Result<()
         .ok_or_else(|| RecordError::Bpf("BSS data not available".into()))?
         .self_tgid = global_tgid();
 
+    open_skel
+        .maps
+        .rodata_data
+        .as_mut()
+        .ok_or_else(|| RecordError::Bpf("rodata not available".into()))?
+        .enable_futex_tracing = true;
+
     if features.transport == TransportMode::RingBuf {
         open_skel
             .maps

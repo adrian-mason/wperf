@@ -103,8 +103,9 @@ pub fn correlate_events(events: &[WperfEvent]) -> (WaitForGraph, CorrelationStat
                 // Clean up off-CPU record if thread exits.
                 off_cpu.remove(&event.tid);
             }
-            None => {
-                // Unknown event type — skip (forward-compat).
+            Some(EventType::FutexWait) | None => {
+                // FutexWait: consumed by wait_type annotation (task #35).
+                // None: unknown event type — skip (forward-compat).
             }
         }
     }
