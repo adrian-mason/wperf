@@ -24,7 +24,35 @@ enum wperf_event_type {
 	WPERF_EVENT_WAKEUP     = 2,
 	WPERF_EVENT_WAKEUP_NEW = 3,
 	WPERF_EVENT_EXIT       = 4,
+	WPERF_EVENT_FUTEX_WAIT = 5,
 };
+
+/* Futex operation constants (from linux/futex.h).
+ * Guarded: vmlinux.h (BTF dump) doesn't define these macros today,
+ * but #ifndef is zero-cost insurance against future toolchain changes. */
+#ifndef FUTEX_WAIT
+#define FUTEX_WAIT              0
+#endif
+#ifndef FUTEX_LOCK_PI
+#define FUTEX_LOCK_PI           6
+#endif
+#ifndef FUTEX_WAIT_BITSET
+#define FUTEX_WAIT_BITSET       9
+#endif
+#ifndef FUTEX_WAIT_REQUEUE_PI
+#define FUTEX_WAIT_REQUEUE_PI  11
+#endif
+#ifndef FUTEX_CMD_MASK
+#define FUTEX_CMD_MASK         0x7f
+#endif
+
+/*
+ * Futex event field mapping (reuses 40-byte wperf_event struct):
+ *   prev_tid  → uaddr lower 32 bits
+ *   next_tid  → uaddr upper 32 bits
+ *   flags     → futex op (after FUTEX_CMD_MASK)
+ *   prev_pid, next_pid, prev_state → unused (zero)
+ */
 
 /*
  * 40-byte event structure — Rust mirror: src/format/event.rs WperfEvent.
