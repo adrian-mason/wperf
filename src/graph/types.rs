@@ -67,12 +67,27 @@ impl TimeWindow {
     }
 }
 
+/// Wait cause annotation on graph edges.
+///
+/// `None` = futex tracing was not enabled (not traced).
+/// `Some(WaitType::Unknown)` = traced but no matching futex event found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WaitType {
+    Unknown,
+    FutexWait,
+    FutexLockPi,
+    FutexWaitBitset,
+    FutexWaitRequeuePi,
+}
+
 /// Edge metadata in the Wait-For Graph.
 #[derive(Debug, Clone, Serialize)]
 pub struct EdgeWeight {
     pub time_window: TimeWindow,
     pub raw_wait_ms: u64,
     pub attributed_delay_ms: u64,
+    pub wait_type: Option<WaitType>,
 }
 
 impl EdgeWeight {
@@ -81,7 +96,18 @@ impl EdgeWeight {
         Self {
             time_window,
             raw_wait_ms: raw,
-            attributed_delay_ms: raw, // initially == raw
+            attributed_delay_ms: raw,
+            wait_type: None,
+        }
+    }
+
+    pub fn with_wait_type(time_window: TimeWindow, wait_type: WaitType) -> Self {
+        let raw = time_window.duration();
+        Self {
+            time_window,
+            raw_wait_ms: raw,
+            attributed_delay_ms: raw,
+            wait_type: Some(wait_type),
         }
     }
 }
@@ -141,6 +167,35 @@ mod tests {
         assert!(w.contains(49));
         assert!(!w.contains(50)); // half-open
         assert!(!w.contains(9));
+    }
+
+    #[test]
+    fn wait_type_serializes_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&WaitType::FutexWait).unwrap(),
+            "\"futex_wait\""
+        );
+        assert_eq!(
+            serde_json::to_string(&WaitType::FutexLockPi).unwrap(),
+            "\"futex_lock_pi\""
+        );
+        assert_eq!(
+            serde_json::to_string(&WaitType::Unknown).unwrap(),
+            "\"unknown\""
+        );
+    }
+
+    #[test]
+    fn edge_weight_with_wait_type() {
+        let ew = EdgeWeight::with_wait_type(TimeWindow::new(0, 100), WaitType::FutexWait);
+        assert_eq!(ew.wait_type, Some(WaitType::FutexWait));
+        assert_eq!(ew.raw_wait_ms, 100);
+    }
+
+    #[test]
+    fn edge_weight_default_none() {
+        let ew = EdgeWeight::new(TimeWindow::new(0, 50));
+        assert_eq!(ew.wait_type, None);
     }
 
     #[test]
