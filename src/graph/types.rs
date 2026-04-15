@@ -102,13 +102,9 @@ impl EdgeWeight {
     }
 
     pub fn with_wait_type(time_window: TimeWindow, wait_type: WaitType) -> Self {
-        let raw = time_window.duration();
-        Self {
-            time_window,
-            raw_wait_ms: raw,
-            attributed_delay_ms: raw,
-            wait_type: Some(wait_type),
-        }
+        let mut this = Self::new(time_window);
+        this.wait_type = Some(wait_type);
+        this
     }
 }
 
