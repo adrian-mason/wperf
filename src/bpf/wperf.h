@@ -27,12 +27,24 @@ enum wperf_event_type {
 	WPERF_EVENT_FUTEX_WAIT = 5,
 };
 
-/* Futex operation constants (from linux/futex.h). */
+/* Futex operation constants (from linux/futex.h).
+ * Guarded: vmlinux.h (BTF dump) doesn't define these macros today,
+ * but #ifndef is zero-cost insurance against future toolchain changes. */
+#ifndef FUTEX_WAIT
 #define FUTEX_WAIT              0
+#endif
+#ifndef FUTEX_LOCK_PI
 #define FUTEX_LOCK_PI           6
+#endif
+#ifndef FUTEX_WAIT_BITSET
 #define FUTEX_WAIT_BITSET       9
+#endif
+#ifndef FUTEX_WAIT_REQUEUE_PI
 #define FUTEX_WAIT_REQUEUE_PI  11
+#endif
+#ifndef FUTEX_CMD_MASK
 #define FUTEX_CMD_MASK         0x7f
+#endif
 
 /*
  * Futex event field mapping (reuses 40-byte wperf_event struct):
