@@ -59,9 +59,16 @@ fn futex_op_to_wait_type(op: u32) -> WaitType {
     }
 }
 
+/// Maximum gap between `sys_enter_futex` and `sched_switch` for the futex
+/// to be considered the cause of the sleep. The kernel path from
+/// `do_futex` → `futex_wait_setup` → `schedule()` is typically < 100μs;
+/// 1ms provides 10x margin for high-load scheduling delays.
+const FUTEX_CORRELATION_WINDOW_NS: u64 = 1_000_000;
+
 /// Pending futex event for a thread (before it goes off-CPU).
 #[derive(Debug, Clone)]
 struct PendingFutex {
+    timestamp_ns: u64,
     wait_type: WaitType,
 }
 
@@ -154,7 +161,13 @@ fn handle_switch(
 ) {
     // --- prev_tid goes off-CPU (if not preempted) ---
     if event.prev_state != TASK_RUNNING && event.prev_tid != 0 {
-        let wait_type = pending_futex.remove(&event.prev_tid).map(|pf| pf.wait_type);
+        let wait_type = pending_futex.remove(&event.prev_tid).and_then(|pf| {
+            if event.timestamp_ns.saturating_sub(pf.timestamp_ns) <= FUTEX_CORRELATION_WINDOW_NS {
+                Some(pf.wait_type)
+            } else {
+                None
+            }
+        });
 
         off_cpu.insert(
             event.prev_tid,
@@ -202,6 +215,7 @@ fn handle_futex_wait(event: &WperfEvent, pending_futex: &mut HashMap<u32, Pendin
     pending_futex.insert(
         event.tid,
         PendingFutex {
+            timestamp_ns: event.timestamp_ns,
             wait_type: futex_op_to_wait_type(event.futex_op()),
         },
     );
@@ -667,5 +681,54 @@ mod tests {
         assert_eq!(stats.edges_created, 1);
         let edges = graph.all_edges();
         assert_eq!(edges[0].3.wait_type, None);
+    }
+
+    #[test]
+    fn stale_futex_discarded_outside_window() {
+        // Futex returns -EAGAIN (no block), thread later blocks on IO.
+        // The futex event is >1ms before the switch → stale, discarded.
+        let events = vec![
+            futex_event(1_000_000, 100, futex_op::FUTEX_WAIT),
+            // >1ms gap (futex returned -EAGAIN, thread did other work)
+            switch_event(5_000_000, 100, 200, 1), // T100 off (IO block)
+            wakeup_event(6_000_000, 200, 100),
+            switch_event(7_000_000, 200, 100, 0),
+        ];
+
+        let (graph, stats) = correlate_events(&events);
+
+        assert_eq!(stats.edges_created, 1);
+        let edges = graph.all_edges();
+        assert_eq!(edges[0].3.wait_type, None); // stale futex discarded
+    }
+
+    #[test]
+    fn futex_within_window_accepted() {
+        // Futex event <1ms before switch → valid correlation.
+        let events = vec![
+            futex_event(999_500, 100, futex_op::FUTEX_WAIT),
+            switch_event(1_000_000, 100, 200, 1), // 500ns later
+            wakeup_event(2_000_000, 200, 100),
+            switch_event(3_000_000, 200, 100, 0),
+        ];
+
+        let (graph, _) = correlate_events(&events);
+        let edges = graph.all_edges();
+        assert_eq!(edges[0].3.wait_type, Some(WaitType::FutexWait));
+    }
+
+    #[test]
+    fn futex_at_window_boundary_accepted() {
+        // Exactly at 1ms boundary → accepted (<=).
+        let events = vec![
+            futex_event(0, 100, futex_op::FUTEX_LOCK_PI),
+            switch_event(1_000_000, 100, 200, 1), // exactly 1ms
+            wakeup_event(2_000_000, 200, 100),
+            switch_event(3_000_000, 200, 100, 0),
+        ];
+
+        let (graph, _) = correlate_events(&events);
+        let edges = graph.all_edges();
+        assert_eq!(edges[0].3.wait_type, Some(WaitType::FutexLockPi));
     }
 }
