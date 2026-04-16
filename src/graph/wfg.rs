@@ -8,7 +8,7 @@ use petgraph::Direction;
 use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
 
-use super::types::{EdgeWeight, NodeKind, NodeWeight, ThreadId, TimeWindow};
+use super::types::{EdgeWeight, NodeKind, NodeWeight, ThreadId, TimeWindow, WaitType};
 
 /// The Wait-For Graph. Directed graph where:
 /// - Nodes = threads (or pseudo-threads)
@@ -44,6 +44,23 @@ impl WaitForGraph {
         let dst_idx = *self.node_map.get(&dst).expect("dst node not in graph");
         self.graph
             .add_edge(src_idx, dst_idx, EdgeWeight::new(window))
+    }
+
+    /// Add a directed edge with explicit wait type annotation.
+    pub fn add_edge_with_wait_type(
+        &mut self,
+        src: ThreadId,
+        dst: ThreadId,
+        window: TimeWindow,
+        wait_type: WaitType,
+    ) -> EdgeIndex {
+        let src_idx = *self.node_map.get(&src).expect("src node not in graph");
+        let dst_idx = *self.node_map.get(&dst).expect("dst node not in graph");
+        self.graph.add_edge(
+            src_idx,
+            dst_idx,
+            EdgeWeight::with_wait_type(window, wait_type),
+        )
     }
 
     /// Get the `ThreadId` for a `NodeIndex`.
