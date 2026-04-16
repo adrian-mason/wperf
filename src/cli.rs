@@ -134,8 +134,13 @@ mod tests {
 
     #[test]
     fn parse_report_custom_spurious_threshold() {
-        let cli =
-            Cli::parse_from(["wperf", "report", "--spurious-threshold-us", "0", "trace.wperf"]);
+        let cli = Cli::parse_from([
+            "wperf",
+            "report",
+            "--spurious-threshold-us",
+            "0",
+            "trace.wperf",
+        ]);
         match cli.command {
             Command::Report(args) => {
                 assert_eq!(args.spurious_threshold_us, 0);

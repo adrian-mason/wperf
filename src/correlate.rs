@@ -223,14 +223,15 @@ fn handle_switch(
     spurious_threshold_ns: u64,
 ) {
     // --- Resolve pending edge for prev_tid (§2.5 spurious wakeup check) ---
-    if event.prev_tid != 0
-        && let Some(pe) = pending_edges.remove(&event.prev_tid)
-    {
-        let on_cpu_ns = event.timestamp_ns.saturating_sub(pe.switch_in_ns);
-        if event.prev_state != TASK_RUNNING && on_cpu_ns < spurious_threshold_ns {
-            stats.false_wakeup_filtered_count += 1;
-        } else {
-            add_edge_from_pending(graph, pe, stats);
+    #[allow(clippy::collapsible_if)]
+    if event.prev_tid != 0 {
+        if let Some(pe) = pending_edges.remove(&event.prev_tid) {
+            let on_cpu_ns = event.timestamp_ns.saturating_sub(pe.switch_in_ns);
+            if event.prev_state != TASK_RUNNING && on_cpu_ns < spurious_threshold_ns {
+                stats.false_wakeup_filtered_count += 1;
+            } else {
+                add_edge_from_pending(graph, pe, stats);
+            }
         }
     }
 
