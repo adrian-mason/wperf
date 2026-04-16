@@ -26,7 +26,7 @@ critical_path:
 health:
   cascade_depth_truncation_count: ~
   drop_count: 5
-  false_wakeup_filtered_count: ~
+  false_wakeup_filtered_count: 0
   invariants_ok: true
   partial_stack_count: ~
   unmatched_wakeup_count: 0
@@ -35,6 +35,7 @@ stats:
   correlation:
     edges_created: 1
     events_processed: 3
+    false_wakeup_filtered_count: 0
     switch_in_without_waker_count: 0
     unmatched_switch_in_count: 1
     unmatched_wakeup_count: 0

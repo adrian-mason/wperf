@@ -55,6 +55,12 @@ pub struct ReportArgs {
     /// Output format.
     #[arg(short, long, default_value = "json")]
     pub format: ReportFormat,
+
+    /// Spurious wakeup filter threshold in microseconds (§2.5).
+    /// Wakeups where the thread runs for less than this before sleeping
+    /// again are classified as noise. Set to 0 to disable filtering.
+    #[arg(long, default_value = "50")]
+    pub spurious_threshold_us: u32,
 }
 
 /// Output formats for `wperf report`.
@@ -120,6 +126,24 @@ mod tests {
         match cli.command {
             Command::Report(args) => {
                 assert_eq!(args.input, PathBuf::from("trace.wperf"));
+                assert_eq!(args.spurious_threshold_us, 50);
+            }
+            _ => panic!("expected Report"),
+        }
+    }
+
+    #[test]
+    fn parse_report_custom_spurious_threshold() {
+        let cli = Cli::parse_from([
+            "wperf",
+            "report",
+            "--spurious-threshold-us",
+            "0",
+            "trace.wperf",
+        ]);
+        match cli.command {
+            Command::Report(args) => {
+                assert_eq!(args.spurious_threshold_us, 0);
             }
             _ => panic!("expected Report"),
         }
