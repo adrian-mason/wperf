@@ -4,7 +4,7 @@ expression: health_json
 ---
 cascade_depth_truncation_count: ~
 drop_count: 7
-false_wakeup_filtered_count: ~
+false_wakeup_filtered_count: 0
 invariants_ok: true
 partial_stack_count: ~
 unmatched_wakeup_count: 0

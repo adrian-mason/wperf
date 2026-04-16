@@ -224,7 +224,7 @@ fn snapshot_error_unknown_record_type() {
 /// Helper: write events → open reader → `build_report()`.
 fn build_test_report(events: &[WperfEvent], drop_count: u64) -> report::ReportOutput {
     let mut reader = write_and_open(events, drop_count);
-    report::build_report(&mut reader).unwrap()
+    report::build_report(&mut reader, wperf::correlate::DEFAULT_SPURIOUS_THRESHOLD_NS).unwrap()
 }
 
 #[test]

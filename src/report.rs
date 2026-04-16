@@ -122,7 +122,7 @@ pub struct HealthMetrics {
     pub partial_stack_count: Option<u64>,
     /// Unavailable: cascade engine depth limit exists but is not instrumented.
     pub cascade_depth_truncation_count: Option<u64>,
-    /// Unavailable: no false-wakeup filter in Phase 1.
+    /// Wakeup edges pruned by the spurious wakeup filter (§2.5).
     pub false_wakeup_filtered_count: Option<u64>,
 }
 
@@ -133,7 +133,8 @@ pub fn run(args: &ReportArgs) -> Result<(), ReportError> {
         ReaderError::Io(io) => ReportError::Io(io),
         other => ReportError::Pipeline(PipelineError::Reader(other)),
     })?;
-    let report = build_report(&mut reader)?;
+    let threshold_ns = u64::from(args.spurious_threshold_us) * 1_000;
+    let report = build_report(&mut reader, threshold_ns)?;
 
     match args.format {
         ReportFormat::Json => {
@@ -164,9 +165,10 @@ pub fn run(args: &ReportArgs) -> Result<(), ReportError> {
 /// Pure, testable report builder: runs the full analysis pipeline on a reader.
 pub fn build_report<R: Read + Seek>(
     reader: &mut WperfReader<R>,
+    spurious_threshold_ns: u64,
 ) -> Result<ReportOutput, ReportError> {
-    // Step 1-3: parse + sort + correlate
-    let (wfg, stats) = pipeline::build_wait_for_graph(reader)?;
+    // Step 1-3: parse + sort + correlate + noise edge pruning (§2.5)
+    let (wfg, stats) = pipeline::build_wait_for_graph(reader, spurious_threshold_ns)?;
 
     // Read footer metadata for drop_count — propagate real errors (malformed
     // footer, oversized payload, I/O). Crash-recovery (no footer) is already
@@ -190,6 +192,7 @@ pub fn build_report<R: Read + Seek>(
 
     let invariants_ok = cascade.graph_metrics.invariants_ok;
     let unmatched_wakeup_count = stats.correlation.unmatched_wakeup_count;
+    let false_wakeup_filtered_count = stats.correlation.false_wakeup_filtered_count;
 
     Ok(ReportOutput {
         cascade,
@@ -202,7 +205,7 @@ pub fn build_report<R: Read + Seek>(
             unmatched_wakeup_count,
             partial_stack_count: None,
             cascade_depth_truncation_count: None,
-            false_wakeup_filtered_count: None,
+            false_wakeup_filtered_count: Some(false_wakeup_filtered_count),
         },
     })
 }
@@ -261,7 +264,8 @@ mod tests {
     #[test]
     fn empty_trace_produces_valid_report() {
         let mut reader = write_and_read(&[], 0);
-        let report = build_report(&mut reader).unwrap();
+        let report =
+            build_report(&mut reader, crate::correlate::DEFAULT_SPURIOUS_THRESHOLD_NS).unwrap();
 
         assert_eq!(report.cascade.edges.len(), 0);
         assert!(report.critical_path.is_none());
@@ -278,7 +282,8 @@ mod tests {
             switch_event(3_000_000, 200, 100, 0), // T100 back on-CPU
         ];
         let mut reader = write_and_read(&events, 0);
-        let report = build_report(&mut reader).unwrap();
+        let report =
+            build_report(&mut reader, crate::correlate::DEFAULT_SPURIOUS_THRESHOLD_NS).unwrap();
 
         assert_eq!(report.stats.events_read, 3);
         assert_eq!(report.stats.correlation.edges_created, 1);
@@ -295,7 +300,8 @@ mod tests {
     #[test]
     fn report_includes_drop_count() {
         let mut reader = write_and_read(&[], 42);
-        let report = build_report(&mut reader).unwrap();
+        let report =
+            build_report(&mut reader, crate::correlate::DEFAULT_SPURIOUS_THRESHOLD_NS).unwrap();
 
         assert_eq!(report.health.drop_count, Some(42));
     }
@@ -308,7 +314,8 @@ mod tests {
             switch_event(3_000_000, 200, 100, 0),
         ];
         let mut reader = write_and_read(&events, 7);
-        let report = build_report(&mut reader).unwrap();
+        let report =
+            build_report(&mut reader, crate::correlate::DEFAULT_SPURIOUS_THRESHOLD_NS).unwrap();
 
         // Actual metrics — wired from pipeline
         assert!(report.health.invariants_ok);
@@ -321,7 +328,8 @@ mod tests {
         // Wakeup with no matching off-CPU switch → unmatched
         let events = vec![wakeup_event(1_000_000, 200, 100)];
         let mut reader = write_and_read(&events, 0);
-        let report = build_report(&mut reader).unwrap();
+        let report =
+            build_report(&mut reader, crate::correlate::DEFAULT_SPURIOUS_THRESHOLD_NS).unwrap();
 
         assert_eq!(report.health.unmatched_wakeup_count, 1);
     }
@@ -329,12 +337,14 @@ mod tests {
     #[test]
     fn health_metrics_unavailable_are_null() {
         let mut reader = write_and_read(&[], 0);
-        let report = build_report(&mut reader).unwrap();
+        let report =
+            build_report(&mut reader, crate::correlate::DEFAULT_SPURIOUS_THRESHOLD_NS).unwrap();
 
         // Unavailable metrics — not yet measured, serialized as null
         assert!(report.health.partial_stack_count.is_none());
         assert!(report.health.cascade_depth_truncation_count.is_none());
-        assert!(report.health.false_wakeup_filtered_count.is_none());
+        // false_wakeup_filtered_count is now active (§2.5)
+        assert_eq!(report.health.false_wakeup_filtered_count, Some(0));
     }
 
     #[test]
@@ -345,7 +355,8 @@ mod tests {
             switch_event(3_000_000, 200, 100, 0),
         ];
         let mut reader = write_and_read(&events, 5);
-        let report = build_report(&mut reader).unwrap();
+        let report =
+            build_report(&mut reader, crate::correlate::DEFAULT_SPURIOUS_THRESHOLD_NS).unwrap();
 
         let json = serde_json::to_value(&report).unwrap();
         assert!(json["cascade"]["edges"].is_array());
@@ -361,7 +372,8 @@ mod tests {
         // Unavailable metrics are null in JSON
         assert!(json["health"]["partial_stack_count"].is_null());
         assert!(json["health"]["cascade_depth_truncation_count"].is_null());
-        assert!(json["health"]["false_wakeup_filtered_count"].is_null());
+        // false_wakeup_filtered_count is now active (§2.5)
+        assert_eq!(json["health"]["false_wakeup_filtered_count"], 0);
     }
 
     #[test]
@@ -384,7 +396,7 @@ mod tests {
         buf[size_field_offset..size_field_offset + 8].copy_from_slice(&bad_size.to_le_bytes());
 
         let mut reader = WperfReader::open(Cursor::new(buf)).unwrap();
-        let result = build_report(&mut reader);
+        let result = build_report(&mut reader, crate::correlate::DEFAULT_SPURIOUS_THRESHOLD_NS);
         assert!(result.is_err(), "corrupted metadata must propagate error");
     }
 

@@ -45,7 +45,8 @@ fn build_report_from(events: &[WperfEvent], drop_count: u64) -> report::ReportOu
     let data = write_trace(events, drop_count);
     let mut reader =
         WperfReader::open(Cursor::new(data)).expect("failed to open constructed trace");
-    report::build_report(&mut reader).expect("failed to build report from constructed trace")
+    report::build_report(&mut reader, wperf::correlate::DEFAULT_SPURIOUS_THRESHOLD_NS)
+        .expect("failed to build report from constructed trace")
 }
 
 /// Context switch: `prev_tid` goes off-CPU (sleeping), `next_tid` comes on-CPU.
@@ -110,7 +111,8 @@ fn fixture_empty_trace() {
     // Unavailable metrics are None.
     assert!(report.health.partial_stack_count.is_none());
     assert!(report.health.cascade_depth_truncation_count.is_none());
-    assert!(report.health.false_wakeup_filtered_count.is_none());
+    // false_wakeup_filtered_count is now active (§2.5)
+    assert_eq!(report.health.false_wakeup_filtered_count, Some(0));
 }
 
 // ---------------------------------------------------------------------------
@@ -304,7 +306,8 @@ fn simulate_crash(data: &mut [u8], recoverable_events: usize) {
 
 fn build_report_from_raw(data: Vec<u8>) -> report::ReportOutput {
     let mut reader = WperfReader::open(Cursor::new(data)).expect("failed to open raw trace");
-    report::build_report(&mut reader).expect("failed to build report from raw trace")
+    report::build_report(&mut reader, wperf::correlate::DEFAULT_SPURIOUS_THRESHOLD_NS)
+        .expect("failed to build report from raw trace")
 }
 
 // ---------------------------------------------------------------------------

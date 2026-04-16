@@ -65,11 +65,27 @@ fn futex_op_to_wait_type(op: u32) -> WaitType {
 /// 1ms provides 10x margin for high-load scheduling delays.
 const FUTEX_CORRELATION_WINDOW_NS: u64 = 1_000_000;
 
+/// Default spurious wakeup filter threshold: 50μs in nanoseconds (§2.5).
+/// Threads that run for less than this after being woken are classified as
+/// spurious wakeups and their edges excluded from the graph.
+pub const DEFAULT_SPURIOUS_THRESHOLD_NS: u64 = 50_000;
+
 /// Pending futex event for a thread (before it goes off-CPU).
 #[derive(Debug, Clone)]
 struct PendingFutex {
     timestamp_ns: u64,
     wait_type: WaitType,
+}
+
+/// A deferred edge awaiting spurious wakeup check (§2.5).
+/// Created at switch-in, committed or discarded at next switch-out.
+#[derive(Debug, Clone)]
+struct PendingEdge {
+    switch_in_ns: u64,
+    src: ThreadId,
+    dst: ThreadId,
+    window: TimeWindow,
+    wait_type: Option<WaitType>,
 }
 
 /// Statistics from the correlation pass.
@@ -95,16 +111,27 @@ pub struct CorrelationStats {
     /// Switch-in events where off-CPU record had no waker (no wakeup seen).
     /// *Internal diagnostic stat* — not a canonical coverage metric.
     pub switch_in_without_waker_count: u64,
+    /// Edges filtered as spurious wakeups (on-CPU < threshold after wakeup).
+    /// **Canonical coverage metric** (§2.5 / §3.8).
+    pub false_wakeup_filtered_count: u64,
 }
 
 /// Correlate a globally timestamp-sorted event stream into a `WaitForGraph`.
+///
+/// `spurious_threshold_ns` controls the spurious wakeup filter (§2.5):
+/// edges where the woken thread runs for less than this duration (in
+/// nanoseconds) before sleeping again are discarded as noise. Pass `0`
+/// to disable filtering.
 ///
 /// Returns the populated graph and correlation statistics.
 ///
 /// # Panics
 ///
 /// Debug builds assert that the input is sorted by `timestamp_ns`.
-pub fn correlate_events(events: &[WperfEvent]) -> (WaitForGraph, CorrelationStats) {
+pub fn correlate_events(
+    events: &[WperfEvent],
+    spurious_threshold_ns: u64,
+) -> (WaitForGraph, CorrelationStats) {
     debug_assert!(
         events
             .windows(2)
@@ -116,6 +143,7 @@ pub fn correlate_events(events: &[WperfEvent]) -> (WaitForGraph, CorrelationStat
     let mut stats = CorrelationStats::default();
     let mut off_cpu: HashMap<u32, OffCpuRecord> = HashMap::new();
     let mut pending_futex: HashMap<u32, PendingFutex> = HashMap::new();
+    let mut pending_edges: HashMap<u32, PendingEdge> = HashMap::new();
 
     for event in events {
         stats.events_processed += 1;
@@ -127,13 +155,16 @@ pub fn correlate_events(events: &[WperfEvent]) -> (WaitForGraph, CorrelationStat
                     &mut graph,
                     &mut off_cpu,
                     &mut pending_futex,
+                    &mut pending_edges,
                     &mut stats,
+                    spurious_threshold_ns,
                 );
             }
             Some(EventType::Wakeup | EventType::WakeupNew) => {
                 handle_wakeup(event, &mut off_cpu, &mut stats);
             }
             Some(EventType::Exit) => {
+                commit_pending_edge(&mut pending_edges, event.tid, &mut graph, &mut stats);
                 off_cpu.remove(&event.tid);
                 pending_futex.remove(&event.tid);
             }
@@ -144,21 +175,65 @@ pub fn correlate_events(events: &[WperfEvent]) -> (WaitForGraph, CorrelationStat
         }
     }
 
+    for (_, pe) in pending_edges.drain() {
+        add_edge_from_pending(&mut graph, pe, &mut stats);
+    }
+
     (graph, stats)
+}
+
+/// Commit a `PendingEdge` into the graph unconditionally.
+#[allow(clippy::needless_pass_by_value)]
+fn add_edge_from_pending(graph: &mut WaitForGraph, pe: PendingEdge, stats: &mut CorrelationStats) {
+    graph.add_node(pe.src, NodeKind::UserThread);
+    graph.add_node(pe.dst, NodeKind::UserThread);
+    if let Some(wt) = pe.wait_type {
+        graph.add_edge_with_wait_type(pe.src, pe.dst, pe.window, wt);
+    } else {
+        graph.add_edge(pe.src, pe.dst, pe.window);
+    }
+    stats.edges_created += 1;
+}
+
+/// If `tid` has a pending edge, commit it to the graph.
+fn commit_pending_edge(
+    pending_edges: &mut HashMap<u32, PendingEdge>,
+    tid: u32,
+    graph: &mut WaitForGraph,
+    stats: &mut CorrelationStats,
+) {
+    if let Some(pe) = pending_edges.remove(&tid) {
+        add_edge_from_pending(graph, pe, stats);
+    }
 }
 
 /// Handle a `sched_switch` event.
 ///
-/// Two things happen in a single switch:
-/// - `prev_tid` is being switched **out** (may go off-CPU)
-/// - `next_tid` is being switched **in** (may finalize a wait edge)
+/// Three things happen in a single switch:
+/// 1. Resolve any pending edge for `prev_tid` (spurious wakeup check)
+/// 2. `prev_tid` is being switched **out** (may go off-CPU)
+/// 3. `next_tid` is being switched **in** (may create a deferred edge)
 fn handle_switch(
     event: &WperfEvent,
     graph: &mut WaitForGraph,
     off_cpu: &mut HashMap<u32, OffCpuRecord>,
     pending_futex: &mut HashMap<u32, PendingFutex>,
+    pending_edges: &mut HashMap<u32, PendingEdge>,
     stats: &mut CorrelationStats,
+    spurious_threshold_ns: u64,
 ) {
+    // --- Resolve pending edge for prev_tid (§2.5 spurious wakeup check) ---
+    if event.prev_tid != 0
+        && let Some(pe) = pending_edges.remove(&event.prev_tid)
+    {
+        let on_cpu_ns = event.timestamp_ns.saturating_sub(pe.switch_in_ns);
+        if event.prev_state != TASK_RUNNING && on_cpu_ns < spurious_threshold_ns {
+            stats.false_wakeup_filtered_count += 1;
+        } else {
+            add_edge_from_pending(graph, pe, stats);
+        }
+    }
+
     // --- prev_tid goes off-CPU (if not preempted) ---
     if event.prev_state != TASK_RUNNING && event.prev_tid != 0 {
         let wait_type = pending_futex.remove(&event.prev_tid).and_then(|pf| {
@@ -179,29 +254,32 @@ fn handle_switch(
         );
     }
 
-    // --- next_tid comes on-CPU (finalize edge if possible) ---
+    // --- next_tid comes on-CPU (defer edge if possible) ---
     if event.next_tid == 0 {
         return;
     }
 
     if let Some(record) = off_cpu.remove(&event.next_tid) {
         if let Some(waker_tid) = record.waker_tid {
-            let off_cpu_ms = event.timestamp_ns.saturating_sub(record.switch_out_ns) / 1_000_000;
+            let off_cpu_ns = event.timestamp_ns.saturating_sub(record.switch_out_ns);
+            let off_cpu_ms = off_cpu_ns / 1_000_000;
 
             let src = ThreadId(i64::from(event.next_tid));
             let dst = ThreadId(i64::from(waker_tid));
-            graph.add_node(src, NodeKind::UserThread);
-            graph.add_node(dst, NodeKind::UserThread);
 
             let start_ms = record.switch_out_ns / 1_000_000;
             let window = TimeWindow::new(start_ms, start_ms + off_cpu_ms);
-            if let Some(wt) = record.wait_type {
-                graph.add_edge_with_wait_type(src, dst, window, wt);
-            } else {
-                graph.add_edge(src, dst, window);
-            }
 
-            stats.edges_created += 1;
+            pending_edges.insert(
+                event.next_tid,
+                PendingEdge {
+                    switch_in_ns: event.timestamp_ns,
+                    src,
+                    dst,
+                    window,
+                    wait_type: record.wait_type,
+                },
+            );
         } else {
             stats.switch_in_without_waker_count += 1;
         }
@@ -253,6 +331,10 @@ mod tests {
     use super::*;
     use crate::format::event::EventType;
 
+    fn correlate(events: &[WperfEvent]) -> (WaitForGraph, CorrelationStats) {
+        correlate_events(events, DEFAULT_SPURIOUS_THRESHOLD_NS)
+    }
+
     fn switch_event(ts: u64, prev_tid: u32, next_tid: u32, prev_state: u8) -> WperfEvent {
         WperfEvent {
             timestamp_ns: ts,
@@ -303,7 +385,7 @@ mod tests {
 
     #[test]
     fn empty_input() {
-        let (graph, stats) = correlate_events(&[]);
+        let (graph, stats) = correlate(&[]);
         assert_eq!(graph.node_count(), 0);
         assert_eq!(stats.events_processed, 0);
         assert_eq!(stats.edges_created, 0);
@@ -318,7 +400,7 @@ mod tests {
             switch_event(3_000_000, 200, 100, 0), // T100 comes on-CPU
         ];
 
-        let (graph, stats) = correlate_events(&events);
+        let (graph, stats) = correlate(&events);
 
         assert_eq!(stats.events_processed, 3);
         assert_eq!(stats.edges_created, 1);
@@ -341,7 +423,7 @@ mod tests {
             switch_event(2_000_000, 200, 100, 0), // T100 back
         ];
 
-        let (graph, stats) = correlate_events(&events);
+        let (graph, stats) = correlate(&events);
 
         assert_eq!(stats.edges_created, 0);
         assert_eq!(stats.unmatched_switch_in_count, 2); // both next_tids have no off-CPU record
@@ -353,7 +435,7 @@ mod tests {
         // Wakeup for a thread not in off-CPU table.
         let events = vec![wakeup_event(1_000_000, 200, 100)];
 
-        let (_, stats) = correlate_events(&events);
+        let (_, stats) = correlate(&events);
 
         assert_eq!(stats.unmatched_wakeup_count, 1);
         assert_eq!(stats.edges_created, 0);
@@ -364,7 +446,7 @@ mod tests {
         // Thread appears on-CPU without prior switch-out (trace start).
         let events = vec![switch_event(1_000_000, 200, 100, 0)];
 
-        let (_, stats) = correlate_events(&events);
+        let (_, stats) = correlate(&events);
 
         assert_eq!(stats.unmatched_switch_in_count, 1);
     }
@@ -380,7 +462,7 @@ mod tests {
             switch_event(4_000_000, 300, 100, 0), // T100 comes on-CPU
         ];
 
-        let (graph, stats) = correlate_events(&events);
+        let (graph, stats) = correlate(&events);
 
         assert_eq!(stats.edges_created, 1);
         let edges = graph.all_edges();
@@ -399,7 +481,7 @@ mod tests {
             switch_event(3_000_000, 200, 100, 0), // T100 on-CPU, no wakeup
         ];
 
-        let (_, stats) = correlate_events(&events);
+        let (_, stats) = correlate(&events);
 
         assert_eq!(stats.edges_created, 0);
         assert_eq!(stats.switch_in_without_waker_count, 1);
@@ -413,7 +495,7 @@ mod tests {
             exit_event(2_000_000, 100),           // T100 exits
         ];
 
-        let (_, stats) = correlate_events(&events);
+        let (_, stats) = correlate(&events);
 
         assert_eq!(stats.edges_created, 0);
         assert_eq!(stats.events_processed, 2);
@@ -440,7 +522,7 @@ mod tests {
             switch_event(3_000_000, 200, 100, 0), // T100 on-CPU
         ];
 
-        let (graph, stats) = correlate_events(&events);
+        let (graph, stats) = correlate(&events);
 
         assert_eq!(stats.edges_created, 1);
         let edges = graph.all_edges();
@@ -459,7 +541,7 @@ mod tests {
             switch_event(3_500_000, 300, 200, 0), // T200 on-CPU
         ];
 
-        let (graph, stats) = correlate_events(&events);
+        let (graph, stats) = correlate(&events);
 
         assert_eq!(stats.edges_created, 2);
         assert_eq!(graph.node_count(), 4); // T100, T200, T300, T400
@@ -473,7 +555,7 @@ mod tests {
             switch_event(2_000_000, 100, 0, 0), // T100 switches to idle (next=0 ignored)
         ];
 
-        let (graph, stats) = correlate_events(&events);
+        let (graph, stats) = correlate(&events);
 
         assert_eq!(stats.edges_created, 0);
         assert_eq!(graph.node_count(), 0);
@@ -489,7 +571,7 @@ mod tests {
             switch_event(3_000_000, 200, 100, 0), // T100 on-CPU
         ];
 
-        let (graph, stats) = correlate_events(&events);
+        let (graph, stats) = correlate(&events);
 
         assert_eq!(stats.edges_created, 0);
         assert_eq!(stats.switch_in_without_waker_count, 1);
@@ -512,7 +594,7 @@ mod tests {
             flags: 0,
         }];
 
-        let (_, stats) = correlate_events(&events);
+        let (_, stats) = correlate(&events);
 
         assert_eq!(stats.events_processed, 1);
         assert_eq!(stats.edges_created, 0);
@@ -526,6 +608,7 @@ mod tests {
         assert_eq!(stats.unmatched_wakeup_count, 0);
         assert_eq!(stats.unmatched_switch_in_count, 0);
         assert_eq!(stats.switch_in_without_waker_count, 0);
+        assert_eq!(stats.false_wakeup_filtered_count, 0);
     }
 
     #[test]
@@ -536,7 +619,7 @@ mod tests {
             switch_event(10_200_000, 200, 100, 0),
         ];
 
-        let (graph, stats) = correlate_events(&events);
+        let (graph, stats) = correlate(&events);
 
         assert_eq!(stats.edges_created, 1);
         let edges = graph.all_edges();
@@ -571,7 +654,7 @@ mod tests {
             switch_event(3_000_000, 200, 100, 0),
         ];
 
-        let (graph, stats) = correlate_events(&events);
+        let (graph, stats) = correlate(&events);
 
         assert_eq!(stats.edges_created, 1);
         let edges = graph.all_edges();
@@ -587,7 +670,7 @@ mod tests {
             switch_event(3_000_000, 200, 100, 0),
         ];
 
-        let (graph, _) = correlate_events(&events);
+        let (graph, _) = correlate(&events);
         let edges = graph.all_edges();
         assert_eq!(edges[0].3.wait_type, Some(WaitType::FutexLockPi));
     }
@@ -601,7 +684,7 @@ mod tests {
             switch_event(3_000_000, 200, 100, 0),
         ];
 
-        let (graph, _) = correlate_events(&events);
+        let (graph, _) = correlate(&events);
         let edges = graph.all_edges();
         assert_eq!(edges[0].3.wait_type, Some(WaitType::FutexWaitBitset));
     }
@@ -615,7 +698,7 @@ mod tests {
             switch_event(3_000_000, 200, 100, 0),
         ];
 
-        let (graph, _) = correlate_events(&events);
+        let (graph, _) = correlate(&events);
         let edges = graph.all_edges();
         assert_eq!(edges[0].3.wait_type, Some(WaitType::FutexWaitRequeuePi));
     }
@@ -628,7 +711,7 @@ mod tests {
             switch_event(3_000_000, 200, 100, 0),
         ];
 
-        let (graph, _) = correlate_events(&events);
+        let (graph, _) = correlate(&events);
         let edges = graph.all_edges();
         assert_eq!(edges[0].3.wait_type, None);
     }
@@ -647,7 +730,7 @@ mod tests {
             switch_event(6_000_000, 200, 100, 0),
         ];
 
-        let (graph, stats) = correlate_events(&events);
+        let (graph, stats) = correlate(&events);
 
         assert_eq!(stats.edges_created, 2);
         let edges = graph.all_edges();
@@ -662,7 +745,7 @@ mod tests {
             exit_event(1_000_000, 100),
         ];
 
-        let (_, stats) = correlate_events(&events);
+        let (_, stats) = correlate(&events);
         assert_eq!(stats.edges_created, 0);
     }
 
@@ -676,7 +759,7 @@ mod tests {
             switch_event(3_000_000, 300, 200, 0),
         ];
 
-        let (graph, stats) = correlate_events(&events);
+        let (graph, stats) = correlate(&events);
 
         assert_eq!(stats.edges_created, 1);
         let edges = graph.all_edges();
@@ -695,7 +778,7 @@ mod tests {
             switch_event(7_000_000, 200, 100, 0),
         ];
 
-        let (graph, stats) = correlate_events(&events);
+        let (graph, stats) = correlate(&events);
 
         assert_eq!(stats.edges_created, 1);
         let edges = graph.all_edges();
@@ -712,7 +795,7 @@ mod tests {
             switch_event(3_000_000, 200, 100, 0),
         ];
 
-        let (graph, _) = correlate_events(&events);
+        let (graph, _) = correlate(&events);
         let edges = graph.all_edges();
         assert_eq!(edges[0].3.wait_type, Some(WaitType::FutexWait));
     }
@@ -727,8 +810,175 @@ mod tests {
             switch_event(3_000_000, 200, 100, 0),
         ];
 
-        let (graph, _) = correlate_events(&events);
+        let (graph, _) = correlate(&events);
         let edges = graph.all_edges();
         assert_eq!(edges[0].3.wait_type, Some(WaitType::FutexLockPi));
+    }
+
+    // --- Spurious wakeup filter tests (§2.5) ---
+
+    #[test]
+    fn spurious_wakeup_filtered() {
+        // Thread wakes, runs for 20μs (< 50μs threshold), sleeps again → spurious.
+        let events = vec![
+            switch_event(1_000_000, 100, 200, 1), // T100 off-CPU
+            wakeup_event(2_000_000, 200, 100),    // T200 wakes T100
+            switch_event(3_000_000, 200, 100, 0), // T100 on-CPU
+            switch_event(3_020_000, 100, 200, 1), // T100 off after 20μs → spurious
+            wakeup_event(5_000_000, 200, 100),    // T200 wakes T100 again
+            switch_event(6_000_000, 200, 100, 0), // T100 on-CPU (real this time)
+        ];
+
+        let (graph, stats) = correlate(&events);
+
+        assert_eq!(stats.false_wakeup_filtered_count, 1);
+        assert_eq!(stats.edges_created, 1);
+        assert_eq!(graph.edge_count(), 1);
+    }
+
+    #[test]
+    fn spurious_wakeup_at_threshold_kept() {
+        // Thread runs for exactly 50μs (= threshold) → NOT spurious (< is strict).
+        let events = vec![
+            switch_event(1_000_000, 100, 200, 1),
+            wakeup_event(2_000_000, 200, 100),
+            switch_event(3_000_000, 200, 100, 0), // T100 on-CPU
+            switch_event(3_050_000, 100, 200, 1), // T100 off after exactly 50μs
+        ];
+
+        let (graph, stats) = correlate(&events);
+
+        assert_eq!(stats.false_wakeup_filtered_count, 0);
+        assert_eq!(stats.edges_created, 1);
+        assert_eq!(graph.edge_count(), 1);
+    }
+
+    #[test]
+    fn spurious_wakeup_above_threshold_kept() {
+        // Thread runs for 100μs (> 50μs threshold) → kept.
+        let events = vec![
+            switch_event(1_000_000, 100, 200, 1),
+            wakeup_event(2_000_000, 200, 100),
+            switch_event(3_000_000, 200, 100, 0),
+            switch_event(3_100_000, 100, 200, 1), // 100μs on-CPU
+        ];
+
+        let (graph, stats) = correlate(&events);
+
+        assert_eq!(stats.false_wakeup_filtered_count, 0);
+        assert_eq!(stats.edges_created, 1);
+        assert_eq!(graph.edge_count(), 1);
+    }
+
+    #[test]
+    fn spurious_preempted_always_committed() {
+        // Thread runs for 10μs but is preempted (RUNNING) → committed, not spurious.
+        let events = vec![
+            switch_event(1_000_000, 100, 200, 1),
+            wakeup_event(2_000_000, 200, 100),
+            switch_event(3_000_000, 200, 100, 0), // T100 on-CPU
+            switch_event(3_010_000, 100, 200, 0), // preempted after 10μs (RUNNING)
+        ];
+
+        let (graph, stats) = correlate(&events);
+
+        assert_eq!(stats.false_wakeup_filtered_count, 0);
+        assert_eq!(stats.edges_created, 1);
+        assert_eq!(graph.edge_count(), 1);
+    }
+
+    #[test]
+    fn spurious_edge_not_committed_at_trace_end() {
+        // Thread wakes and never switches out → committed at end-of-trace.
+        let events = vec![
+            switch_event(1_000_000, 100, 200, 1),
+            wakeup_event(2_000_000, 200, 100),
+            switch_event(3_000_000, 200, 100, 0),
+        ];
+
+        let (graph, stats) = correlate(&events);
+
+        assert_eq!(stats.false_wakeup_filtered_count, 0);
+        assert_eq!(stats.edges_created, 1);
+        assert_eq!(graph.edge_count(), 1);
+    }
+
+    #[test]
+    fn spurious_exit_commits_edge() {
+        // Thread wakes, runs briefly, then exits → committed (meaningful work).
+        let events = vec![
+            switch_event(1_000_000, 100, 200, 1),
+            wakeup_event(2_000_000, 200, 100),
+            switch_event(3_000_000, 200, 100, 0),
+            exit_event(3_010_000, 100), // exits after 10μs
+        ];
+
+        let (graph, stats) = correlate(&events);
+
+        assert_eq!(stats.false_wakeup_filtered_count, 0);
+        assert_eq!(stats.edges_created, 1);
+        assert_eq!(graph.edge_count(), 1);
+    }
+
+    #[test]
+    fn spurious_threshold_zero_disables_filter() {
+        // With threshold=0, even 0μs on-CPU is kept (0 < 0 is false).
+        let events = vec![
+            switch_event(1_000_000, 100, 200, 1),
+            wakeup_event(2_000_000, 200, 100),
+            switch_event(3_000_000, 200, 100, 0),
+            switch_event(3_000_000, 100, 200, 1), // 0ns on-CPU
+        ];
+
+        let (graph, stats) = correlate_events(&events, 0);
+
+        assert_eq!(stats.false_wakeup_filtered_count, 0);
+        assert_eq!(stats.edges_created, 1);
+        assert_eq!(graph.edge_count(), 1);
+    }
+
+    #[test]
+    fn spurious_condvar_pattern() {
+        // Classic condvar spurious: futex_wait → wake → check (< 50μs) → futex_wait again.
+        // First edge filtered, second edge (with new futex annotation) committed.
+        let events = vec![
+            futex_event(900_000, 100, futex_op::FUTEX_WAIT),
+            switch_event(1_000_000, 100, 200, 1), // T100 off (futex)
+            wakeup_event(2_000_000, 200, 100),
+            switch_event(3_000_000, 200, 100, 0), // T100 on-CPU
+            // T100 checks predicate, not satisfied, goes back to futex_wait
+            futex_event(3_010_000, 100, futex_op::FUTEX_WAIT),
+            switch_event(3_020_000, 100, 200, 1), // T100 off after 20μs → spurious
+            wakeup_event(5_000_000, 200, 100),
+            switch_event(6_000_000, 200, 100, 0), // real wakeup
+        ];
+
+        let (graph, stats) = correlate(&events);
+
+        assert_eq!(stats.false_wakeup_filtered_count, 1);
+        assert_eq!(stats.edges_created, 1);
+        let edges = graph.all_edges();
+        assert_eq!(edges[0].3.wait_type, Some(WaitType::FutexWait));
+    }
+
+    #[test]
+    fn spurious_multiple_threads_independent() {
+        // Two threads both have spurious wakeups — independent tracking.
+        let events = vec![
+            switch_event(1_000_000, 100, 300, 1), // T100 off
+            switch_event(1_500_000, 200, 300, 1), // T200 off
+            wakeup_event(2_000_000, 300, 100),    // T300 wakes T100
+            wakeup_event(2_500_000, 300, 200),    // T300 wakes T200
+            switch_event(3_000_000, 300, 100, 0), // T100 on (T300 preempted)
+            switch_event(3_010_000, 100, 300, 1), // T100 off after 10μs → spurious
+            switch_event(3_500_000, 300, 200, 0), // T200 on (T300 preempted)
+            switch_event(3_510_000, 200, 300, 1), // T200 off after 10μs → spurious
+        ];
+
+        let (graph, stats) = correlate(&events);
+
+        assert_eq!(stats.false_wakeup_filtered_count, 2);
+        assert_eq!(stats.edges_created, 0);
+        assert_eq!(graph.edge_count(), 0);
     }
 }

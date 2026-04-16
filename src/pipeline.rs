@@ -78,6 +78,7 @@ pub struct PipelineStats {
 /// Empty traces return `Ok` with an empty graph and zero stats.
 pub fn build_wait_for_graph<R: Read + Seek>(
     reader: &mut WperfReader<R>,
+    spurious_threshold_ns: u64,
 ) -> Result<(WaitForGraph, PipelineStats), PipelineError> {
     // Step 1: Parse
     let mut events = reader.read_all_events()?;
@@ -89,8 +90,8 @@ pub fn build_wait_for_graph<R: Read + Seek>(
     // as that loses determinism for equal-timestamp events.
     events.sort_unstable();
 
-    // Step 3: Correlate
-    let (graph, correlation) = correlate::correlate_events(&events);
+    // Step 3: Correlate + Step 2 noise edge pruning (§2.5)
+    let (graph, correlation) = correlate::correlate_events(&events, spurious_threshold_ns);
 
     Ok((
         graph,
@@ -157,7 +158,8 @@ mod tests {
     #[test]
     fn empty_trace_returns_empty_graph() {
         let mut reader = write_and_read(&[]);
-        let (graph, stats) = build_wait_for_graph(&mut reader).unwrap();
+        let (graph, stats) =
+            build_wait_for_graph(&mut reader, correlate::DEFAULT_SPURIOUS_THRESHOLD_NS).unwrap();
 
         assert_eq!(graph.node_count(), 0);
         assert_eq!(graph.edge_count(), 0);
@@ -169,7 +171,8 @@ mod tests {
     fn single_event_no_edges() {
         let events = vec![switch_event(1_000_000, 100, 200, 0)];
         let mut reader = write_and_read(&events);
-        let (graph, stats) = build_wait_for_graph(&mut reader).unwrap();
+        let (graph, stats) =
+            build_wait_for_graph(&mut reader, correlate::DEFAULT_SPURIOUS_THRESHOLD_NS).unwrap();
 
         assert_eq!(graph.edge_count(), 0);
         assert_eq!(stats.events_read, 1);
@@ -184,7 +187,8 @@ mod tests {
             switch_event(3_000_000, 200, 100, 0),
         ];
         let mut reader = write_and_read(&events);
-        let (graph, stats) = build_wait_for_graph(&mut reader).unwrap();
+        let (graph, stats) =
+            build_wait_for_graph(&mut reader, correlate::DEFAULT_SPURIOUS_THRESHOLD_NS).unwrap();
 
         assert_eq!(stats.events_read, 3);
         assert_eq!(stats.correlation.edges_created, 1);
@@ -204,7 +208,8 @@ mod tests {
             switch_event(1_000_000, 100, 200, 1), // switch-out (written last, ts=1)
         ];
         let mut reader = write_and_read(&events);
-        let (graph, stats) = build_wait_for_graph(&mut reader).unwrap();
+        let (graph, stats) =
+            build_wait_for_graph(&mut reader, correlate::DEFAULT_SPURIOUS_THRESHOLD_NS).unwrap();
 
         // After sorting: switch-out(1) → wakeup(2) → switch-in(3) → 1 edge
         assert_eq!(stats.events_read, 3);
@@ -218,7 +223,8 @@ mod tests {
             wakeup_event(1_000_000, 200, 100), // unmatched wakeup
         ];
         let mut reader = write_and_read(&events);
-        let (_, stats) = build_wait_for_graph(&mut reader).unwrap();
+        let (_, stats) =
+            build_wait_for_graph(&mut reader, correlate::DEFAULT_SPURIOUS_THRESHOLD_NS).unwrap();
 
         assert_eq!(stats.events_read, 1);
         assert_eq!(stats.correlation.unmatched_wakeup_count, 1);
