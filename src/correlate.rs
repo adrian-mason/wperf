@@ -262,14 +262,13 @@ fn handle_switch(
 
     if let Some(record) = off_cpu.remove(&event.next_tid) {
         if let Some(waker_tid) = record.waker_tid {
-            let off_cpu_ns = event.timestamp_ns.saturating_sub(record.switch_out_ns);
-            let off_cpu_ms = off_cpu_ns / 1_000_000;
+            let wait_duration_ns = event.timestamp_ns.saturating_sub(record.switch_out_ns);
 
             let src = ThreadId(i64::from(event.next_tid));
             let dst = ThreadId(i64::from(waker_tid));
 
             let start_ms = record.switch_out_ns / 1_000_000;
-            let window = TimeWindow::new(start_ms, start_ms + off_cpu_ms);
+            let window = TimeWindow::new(start_ms, start_ms + wait_duration_ns / 1_000_000);
 
             pending_edges.insert(
                 event.next_tid,
