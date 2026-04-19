@@ -24,8 +24,12 @@ The rewrite covers every ref reachable from `origin/main` as of the
 - rewrite author: any commit where `author.email == wenbo.zhang@iomesh.com`
   becomes Adrian with `258563901+adrian-mason@users.noreply.github.com`.
 - rewrite committer: same substitution.
-- rewrite trailer: every `Co-Authored-By:` line is removed; a single
-  `Signed-off-by: Adrian Mason <…>` trailer is injected if missing.
+- rewrite trailer: every `Co-Authored-By:` line is removed; the
+  resulting trailer block contains **exactly one** canonical
+  `Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>`
+  (inject if missing, deduplicate if present multiple times, replace if
+  non-canonical address). Applied uniformly to merge and non-merge
+  commits.
 
 Out of scope:
 - PR-attached tags such as `archive/<branch>` are rewritten only if they

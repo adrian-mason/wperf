@@ -1,0 +1,182 @@
+================================================================================
+γ.1 REWRITE-PLAN — Maestro pre-execute bundle + filter-repo contract
+================================================================================
+
+Artefact:    docs/audit/gamma/gamma-1-rewrite-plan-20260419T093107Z.txt
+Owner:       Maestro
+Generated:   2026-04-19 17:31:07 +0800 (UTC 2026-04-19T09:31:07Z)
+Spec:        docs/decisions/gamma-post-audit-spec.md §2, §γ.1 L58-60
+             (post-L27-28 L1(a) robustness patch — (w1) bundle fold)
+
+--------------------------------------------------------------------------------
+ANCHORS
+--------------------------------------------------------------------------------
+
+  EXPECTED_MAIN_SHA = 0a9f8446948c2983582eceecd889677a1e9cee9e
+                      (β merge / PR #117 / Item 10 commit gate; pre-rewrite
+                       baseline per pre-rewrite-snapshot tag-object f736d2fc)
+
+  γ.0 PREFLIGHT    = PASS (4-layer signoff)
+      - Challenger operational-layer 4-point + B-sub 9/9  (msg=94f2ff56 §2-§4)
+      - Critic     spec-layer 4-anchor CONCUR              (msg=94781711 §1)
+      - Oracle     authoritative ratify-receipt            (msg=11b79352 §1)
+      - Adrian     B ruling + byte-fidelity 5-way          (msg=fef999ac)
+
+  Pre-rewrite tags (frozen, §2 L34-35):
+      pre-rewrite-snapshot         -> 0a9f8446... (tag-object f736d2fc)
+      pr111-contaminated-snapshot  -> abd3e720... (tag-object 5f3e72df)
+
+--------------------------------------------------------------------------------
+BUNDLE SCOPE — atomic (w1) commit contents
+--------------------------------------------------------------------------------
+
+On branch `chore/gamma1-w1-bundle` based on `0a9f844`:
+
+  1. docs/decisions/gamma-post-audit-spec.md
+     §2 L27-28 L1(a) robustness patch (Probe msg=bde20112 §3 verbatim):
+       "rewrite trailer: every Co-Authored-By: line is removed; the
+        resulting trailer block contains exactly one canonical
+        Signed-off-by: Adrian Mason <...> (inject if missing, deduplicate
+        if present multiple times, replace if non-canonical address).
+        Applied uniformly to merge and non-merge commits."
+     Endorsement: 5-way (Probe propose + Critic CONCUR msg=c3e0f8dd §1
+                   + Challenger STRONG CONCUR msg=14ee4bc5 §2 + Maestro
+                   CONCUR msg=d1d15b5e §1 + Oracle 5th-voice ENDORSE
+                   msg=2b0ae7d3 §2).
+
+  2. scripts/gamma1_filter_repo.py
+     Callback canonical per Challenger msg=8698f3cf §3 with Oracle
+     msg=2b0ae7d3 §1 explicit ordering:
+       (i)    strip Co-Authored-By: (IGNORECASE per RFC 5322 §2.2.3)
+       (ii.a) strip non-Adrian Signed-off-by: (byte-exact != ADRIAN_CANONICAL)
+       (ii.b) dedup Adrian-canonical Signed-off-by: to first occurrence
+       (iii)  if 0 Adrian signoff remain, append ADRIAN_CANONICAL
+
+     Also performs author/committer email rewrite per §2 L24-26
+     (wenbo.zhang@iomesh.com -> Adrian canonical).
+
+     Filename dashes->underscores deviation: intentional per Oracle
+     msg=11b79352 §2 RULING precedent (content load-bearing; filename
+     non-load-bearing). Required so gamma1-selftest.sh and the
+     filter-repo callback share a single normalize_message source of
+     truth (Python importable module name cannot contain dashes).
+
+  3. scripts/gamma1-selftest.sh
+     5-case adversarial corpus per Maestro msg=12535a11 §2:
+       case 1: Co-Authored-By stripped + Adrian signoff retained
+       case 2: non-Adrian (Wenbo) signoff stripped + Adrian retained
+       case 3: non-Adrian only -> Adrian injected (strip+inject path)
+       case 4: 3x Adrian dedup -> 1x Adrian (dedup path)
+       case 5: merge-no-trailers -> Adrian injected uniformly (Option X)
+     Standalone pre-commit selftest result: 5/5 PASS
+     (verifies normalize_message byte-level correctness; same function
+      is invoked by git-filter-repo via importlib re-exec in the
+      --message-callback body).
+
+  4. docs/audit/gamma/gamma-0-preflight-20260419T091516Z.txt
+     Challenger audit artefact (msg=94f2ff56 §4 fold-request); γ.0
+     9-sub-gate PASS record (4-point + 5-sub B-fulfilment) with
+     origin-live re-derivation evidence. Spec §γ.0 audit-trail
+     load-bearing per Oracle msg=11b79352 §1 receipt.
+
+  5. docs/audit/gamma/gamma-1-rewrite-plan-20260419T093107Z.txt
+     This file. Pre-execute plan + reviewer pins + executor contract.
+
+--------------------------------------------------------------------------------
+EXECUTOR CONTRACT
+--------------------------------------------------------------------------------
+
+  ref scope:       refs/heads/main only (--refs refs/heads/main)
+  rewrite type:    metadata-only (author/committer email + message trailer);
+                   tree/blob/filename bytes unchanged
+  partial mode:    --partial (do not purge non-main refs; preserve
+                   pre-rewrite-snapshot + pr111-contaminated-snapshot
+                   pointees byte-identical)
+  force flag:      --force (non-fresh clone acknowledgement)
+  dry-run hook:    GAMMA1_DRY_RUN=1 env var triggers --dry-run (Maestro
+                   runs dry-run first, verifies rewrite-map sample, then
+                   real execute)
+
+  origin mutation: NONE in γ.1 — strictly local. Origin force-with-lease
+                   is owned by ε phase (gated on γ.3 + γ-post-γ.3 PASS).
+
+  commit count:    137 on origin/main pre-rewrite (+1 (w1) bundle =
+                   138 commits in rewrite scope).
+
+--------------------------------------------------------------------------------
+γ.3 AUDIT PROJECTIONS (Oracle msg=2b0ae7d3 §4 frozen contract)
+--------------------------------------------------------------------------------
+
+  Post-rewrite assertions (Oracle γ.3 auto-fire on
+  gamma-1-rewrite-complete-<ts>.txt emit):
+
+    gamma-3-author-refs.txt
+      - 0 occurrences of `wenbo.zhang@iomesh.com` across author+committer
+      - 100% Adrian canonical identity (258563901+adrian-mason@users...)
+
+    gamma-3-trailer-refs.txt
+      - 0 occurrences of `^Co-[Aa]uthored-[Bb]y:` (case-insensitive)
+      - Every commit body has >=1 `^Signed-off-by:` matching
+        byte-exact ADRIAN_CANONICAL (exactly one per commit post-callback)
+
+  Gate: §γ.3 L71 "both refs files must match the expected shape
+  byte-for-byte" — any stray address / missing trailer triggers γ abort
+  per §5 L99-106.
+
+--------------------------------------------------------------------------------
+EXECUTE FLOW (Maestro)
+--------------------------------------------------------------------------------
+
+  Step 1  — (w1) bundle commit on chore/gamma1-w1-bundle (this commit).
+  Step 2  — Broadcast bundle-commit milestone to #p2-dev:83d0107a.
+  Step 3  — Dry-run: `GAMMA1_DRY_RUN=1 python3 scripts/gamma1_filter_repo.py`
+            Verify rewrite-map samples (5 random commits pre/post) match
+            normalize_message output; verify selftest still 5/5 PASS on
+            the installed file-content.
+  Step 4  — Real execute: `python3 scripts/gamma1_filter_repo.py`.
+  Step 5  — Post-rewrite spot-check: 5 commits cat-file -p;
+            assert (a) 0 Co-Authored-By, (b) Adrian canonical trailer
+            exactly once, (c) no wenbo@iomesh author/committer.
+  Step 6  — Emit gamma-1-rewrite-complete-<ts>.txt with:
+              - pre-rewrite HEAD SHA (= EXPECTED_MAIN_SHA)
+              - post-rewrite HEAD SHA (new, metadata-rewritten)
+              - rewrite-map file contents (old-SHA -> new-SHA pairs)
+              - selftest 5/5 PASS re-attestation
+              - 5-commit spot-check verbatim cat-file output
+  Step 7  — Broadcast γ.1 rewrite-complete to #p2-dev:83d0107a.
+            Oracle γ.3 auto-fires per msg=11b79352 §3.
+
+--------------------------------------------------------------------------------
+RISK POSTURE + ROLLBACK
+--------------------------------------------------------------------------------
+
+  Primary risk:   local main branch diverges from origin/main (expected).
+                  No origin-side mutation in γ.1 — ε phase owns that gate.
+
+  Rollback path:  `git reset --hard pre-rewrite-snapshot^{commit}` on
+                  local main restores the pre-rewrite state (SHA
+                  0a9f8446...). Backup tag and origin/main remain
+                  untouched throughout γ.1.
+
+  Reachability:   pre-rewrite-snapshot and pr111-contaminated-snapshot
+                  remain reachable after γ.1 because (a) --refs limits
+                  rewrite to refs/heads/main and (b) --partial suppresses
+                  filter-repo's aggressive-purge default. Tag-object
+                  SHAs (f736d2fc, 5f3e72df) are byte-preserved.
+
+--------------------------------------------------------------------------------
+SUPERSEDED REFERENCES
+--------------------------------------------------------------------------------
+
+  - Maestro msg=ce4ae7a6 §3.1 pseudocode: SUPERSEDED by Challenger
+    msg=8698f3cf §3 Adrian-canonical-strict canonical (Maestro RETRACT
+    per msg=7f6dd65b; 0-rebut 4-bug ACCEPT).
+
+  - Oracle msg=472beba9 §2(3) `git tag -a -m` tag-fix recommendation:
+    SUPERSEDED by Maestro `update-ref` byte-preserve method per Oracle
+    msg=23f19c9c §1 self-supersede (mode-4 recommendation-improvement
+    canonical exemplar; 5-way alignment).
+
+================================================================================
+END OF γ.1 REWRITE-PLAN ARTEFACT
+================================================================================

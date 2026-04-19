@@ -1,0 +1,185 @@
+================================================================================
+γ.0 PREFLIGHT — Challenger independent re-verify
+================================================================================
+
+Artefact:    docs/audit/gamma/gamma-0-preflight-20260419T091516Z.txt
+Owner:       Challenger (load-bearing γ.0 PASS gate per Oracle msg=23f19c9c §2)
+Generated:   2026-04-19 17:15:16 +0800 (UTC 2026-04-19T09:15:16Z)
+Spec:        docs/decisions/gamma-post-audit-spec.md (pending in (w1) bundle)
+             — §γ.0 L46 Inputs + §2 L34-35 frozen-reference + §5 L108-109 origin-pushed
+Anchors:
+  EXPECTED_MAIN_SHA = 0a9f8446948c2983582eceecd889677a1e9cee9e
+                      (β merge / PR #117 / Item 10 commit gate)
+  Adrian A/B ruling = B (msg=fef999ac, 2026-04-19 17:09:32)
+  Maestro tag-fix    = msg=6aa5e175 (`update-ref` byte-preservation method)
+  Oracle supersede   = msg=23f19c9c §1 (`update-ref` strictly superior)
+  Critic spec stamp  = msg=5786a4d2 §1 (3-anchor §γ.0/§2/§5 PASS)
+
+Method:
+  - `git fetch origin --tags --prune-tags --force`     (sync local view of origin tag refs)
+  - All commands run from /home/maverick/.slock/agents/1fc9479b-d787-423b-a163-82758f6648b1/wperf
+  - Re-derived independently of Maestro msg=6aa5e175 §"γ.0 4-point gate" self-verify;
+    no echo of Maestro evidence, no copy-paste of SHAs from upstream emit.
+
+================================================================================
+4-POINT GATE — canonical per Challenger msg=2a52f057 §3
+================================================================================
+
+(a) LOCAL TAG EXISTS + IS ANNOTATED
+    cmd:  git tag -l 'pre-rewrite-snapshot'
+          git for-each-ref --format='%(refname:short) %(objecttype) %(objectname)' \
+                          refs/tags/pre-rewrite-snapshot
+    out:  pre-rewrite-snapshot
+          pre-rewrite-snapshot tag f736d2fc630470211c5875132a1a50f5d5cd0f19
+    chk:  objecttype == 'tag' (annotated, not lightweight 'commit')   [PASS]
+    verdict: ✅ PASS
+
+(b) ORIGIN TAG EXISTS + IS ANNOTATED
+    cmd:  git ls-remote origin refs/tags/pre-rewrite-snapshot
+    out:  f736d2fc630470211c5875132a1a50f5d5cd0f19  refs/tags/pre-rewrite-snapshot
+    chk:  origin tag-object SHA == local tag-object SHA (`f736d2fc...`)   [PASS]
+          ref name resolves on origin                                      [PASS]
+    verdict: ✅ PASS
+
+(c) ORIGIN-SIDE PEEL → EXPECTED_MAIN_SHA
+    cmd:  git ls-remote origin 'refs/tags/pre-rewrite-snapshot^{}'
+    out:  0a9f8446948c2983582eceecd889677a1e9cee9e  refs/tags/pre-rewrite-snapshot^{}
+    chk:  byte-match against EXPECTED_MAIN_SHA `0a9f8446948c2983582eceecd889677a1e9cee9e`
+    verdict: ✅ PASS
+
+(d) LOCAL PEEL → EXPECTED_MAIN_SHA
+    cmd:  git rev-parse pre-rewrite-snapshot^{commit}
+    out:  0a9f8446948c2983582eceecd889677a1e9cee9e
+    chk:  byte-match against EXPECTED_MAIN_SHA `0a9f8446948c2983582eceecd889677a1e9cee9e`
+          ↔ (c) cross-consistency: local peel == origin peel                [PASS]
+    verdict: ✅ PASS
+
+================================================================================
+B-SPECIFIC SUB-CHECK — per Oracle msg=472beba9 §2(4) / Adrian B fulfilment
+================================================================================
+
+(e.1) RENAMED TAG EXISTS LOCALLY + IS ANNOTATED
+    cmd:  git tag -l 'pr111-contaminated-snapshot'
+          git for-each-ref --format='%(refname:short) %(objecttype) %(objectname)' \
+                          refs/tags/pr111-contaminated-snapshot
+    out:  pr111-contaminated-snapshot
+          pr111-contaminated-snapshot tag 5f3e72df180e4fdab68ab892c21b7b7a8f3c4559
+    chk:  objecttype == 'tag'                                               [PASS]
+          tag-object SHA == ORIGINAL `pre-rewrite-snapshot` SHA `5f3e72df...`
+            (per Maestro msg=6aa5e175 §"Adrian's annotation byte-preservation proof")
+                                                                            [PASS]
+    verdict: ✅ PASS
+
+(e.2) RENAMED TAG EXISTS ON ORIGIN + IS ANNOTATED
+    cmd:  git ls-remote origin refs/tags/pr111-contaminated-snapshot
+    out:  5f3e72df180e4fdab68ab892c21b7b7a8f3c4559  refs/tags/pr111-contaminated-snapshot
+    chk:  origin tag-object SHA == local tag-object SHA == original SHA     [PASS]
+    verdict: ✅ PASS
+
+(e.3) RENAMED TAG PEEL == abd3e72 (PR #111 contamination snapshot pointee)
+    cmd:  git rev-parse pr111-contaminated-snapshot^{commit}
+          git ls-remote origin 'refs/tags/pr111-contaminated-snapshot^{}'
+    out:  abd3e72007bbf19762b8cc6befe7936ef519be86
+          abd3e72007bbf19762b8cc6befe7936ef519be86  refs/tags/pr111-contaminated-snapshot^{}
+    chk:  pointee preserved == `abd3e72007bbf19762b8cc6befe7936ef519be86`
+          local-peel == origin-peel                                         [PASS]
+    verdict: ✅ PASS
+
+(e.4) ANNOTATION BYTE-PRESERVATION (B-intent fulfilment, byte-fidelity layer)
+    method: tag-object SHA equality (git's content-addressing → identical SHA
+            ⇔ identical bytes, including tagger line + epoch + message body)
+    old tag-object SHA (pre-fix `pre-rewrite-snapshot` per Maestro msg=6aa5e175): 5f3e72df180e4fdab68ab892c21b7b7a8f3c4559
+    new tag-object SHA (post-fix `pr111-contaminated-snapshot`):              5f3e72df180e4fdab68ab892c21b7b7a8f3c4559
+    diff: identical (same 40-hex SHA → same blob bytes)                       [PASS]
+
+    cat-file dump (for audit-trail reference):
+      object abd3e72007bbf19762b8cc6befe7936ef519be86
+      type commit
+      tag pre-rewrite-snapshot
+      tagger Adrian Mason <258563901+adrian-mason@users.noreply.github.com> 1776508932 +0800
+
+      Pre-rewrite snapshot of abd3e72 (PR #111 squash with Co-authored-by violation).
+      Points to PRE-rewrite commit sha. Used as safety net during Phase γ.
+      CAVEAT: rollback to this tag restores the Co-authored-by trailer;
+      emergency safety net only, NOT Adrian-compliant state per msg=2e5d25ed / msg=533f2a27.
+
+    note: tag's INTERNAL header line still reads `tag pre-rewrite-snapshot` because
+          it was created under that ref name on 2026-04-18 (epoch 1776508932) by
+          Adrian; renaming via `git update-ref` does NOT (and must not) modify the
+          tag-object's bytes — this is exactly why the SHA is preserved. Safe.
+
+    verdict: ✅ PASS — Adrian B-intent "注释保留" fulfilled at strictest
+             (tag-object SHA byte-identical, tagger metadata + annotation
+             text + epoch all preserved verbatim per Maestro `update-ref`
+             method per Oracle msg=23f19c9c §1 supersede ACK).
+
+(e.5) NEW pre-rewrite-snapshot ANNOTATION CONTENT REVIEW (informational)
+    cat-file dump for audit-trail reference (annotated tag-object f736d2fc):
+      object 0a9f8446948c2983582eceecd889677a1e9cee9e
+      type commit
+      tag pre-rewrite-snapshot
+      tagger Adrian Mason <258563901+adrian-mason@users.noreply.github.com> 1776589857 +0800
+
+      γ pre-rewrite baseline snapshot.
+
+      Points to origin/main HEAD post PR #117 merge (β Item 10 commit gate).
+      EXPECTED_MAIN_SHA: 0a9f8446948c2983582eceecd889677a1e9cee9e
+      Created: 2026-04-19 post-β merge, pre-γ.0 preflight.
+
+      Per Adrian A/B ruling msg=fef999ac = B:
+        - The previous annotated tag pointing to abd3e72 (PR #111 Co-authored-by
+          contamination snapshot, tag-object 5f3e72df) is preserved verbatim
+          under refs/tags/pr111-contaminated-snapshot.
+        - This new pre-rewrite-snapshot (this tag-object) points to the clean
+          β-merged baseline and is the authoritative pre-γ ground-truth per
+          docs/decisions/gamma-post-audit-spec.md §2 / §γ.0 / §5.
+
+      Used by γ.1 filter-repo as the "before" reference; γ.4 BPF-scope diff
+      asserts byte-for-byte tree identity against this pointee.
+
+      Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+    chk:  tagger == Adrian canonical                                        [PASS]
+          EXPECTED_MAIN_SHA cite verbatim                                   [PASS]
+          spec §2 / §γ.0 / §5 verbatim cite                                 [PASS]
+          Adrian ruling msg=fef999ac cite                                   [PASS]
+          pointer to preserved pr111-contaminated-snapshot                  [PASS]
+          Adrian Signed-off-by trailer present                              [PASS]
+    verdict: ✅ PASS
+
+================================================================================
+γ.0 GATE SUMMARY
+================================================================================
+
+  (a) local annotated tag exists                            ✅ PASS
+  (b) origin annotated tag exists                           ✅ PASS
+  (c) origin-side peel → EXPECTED_MAIN_SHA                  ✅ PASS
+  (d) local peel → EXPECTED_MAIN_SHA                        ✅ PASS
+  (e) B-fulfilment sub-check (5 sub-gates)                  ✅ PASS
+
+  γ.0 PREFLIGHT VERDICT: ✅ PASS — all 9 sub-gates verified independently
+
+================================================================================
+DOWNSTREAM HANDOFF
+================================================================================
+
+γ.1 (w1) bundle execution UNBLOCKED:
+  - docs/decisions/gamma-post-audit-spec.md       (Probe msg=bde20112 §3 §2 L27-28 patch verbatim)
+  - scripts/gamma1-filter-repo.py                 (Challenger msg=8698f3cf §3 canonical
+                                                   + Oracle msg=2b0ae7d3 §1 ordering
+                                                   (i)→(ii.a)→(ii.b)→(iii))
+  - scripts/gamma1-selftest.sh                    (5-case byte-level corpus per
+                                                   Maestro msg=12535a11 §2)
+  - docs/audit/gamma/gamma-1-rewrite-plan-<ts>.txt
+  - docs/audit/gamma/gamma-1-rewrite-complete-<ts>.txt   (triggers Oracle γ.3 audit)
+
+Post-γ.1 chain:
+  Oracle γ.3 trailer audit  →  Probe γ post-γ.3 (4-check refs + BPF-scope guard)
+  →  ε force-with-lease + EXPECTED_MAIN_SHA freeze
+  →  θ PR #111 close (after θ.1 archive)
+  →  ζ.1 CI re-run
+  →  Phase 2b #38 P2b-01
+
+================================================================================
+END OF γ.0 PREFLIGHT ARTEFACT
+================================================================================
