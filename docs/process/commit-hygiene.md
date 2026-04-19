@@ -9,7 +9,7 @@ gate. It covers:
 1. Why the gate exists (PR #111 incident, Q3=A ruling).
 2. Onboarding paths (PRIMARY / SECONDARY).
 3. What the four hook layers enforce at commit / push time.
-4. The six-case self-test harness and how to run it.
+4. The eight-case self-test harness and how to run it.
 5. Appendix — "Preflight BLOCK RCA" (canonical L0 / L1(a) / L1(b) / L2).
 
 ## 1. Background
@@ -95,16 +95,17 @@ suspenders optional". L4 in particular is the only defence for the
 `core.hooksPath` entirely unless the wrapper is sourced from shell init.
 
 **L1 ↔ L4 are mutual backstops.** The wrapper reads *stored* config
-(`git -C <repo> config --get user.email`) and therefore does not see a
-one-shot `-c user.email=…` override or `GIT_AUTHOR_* / GIT_COMMITTER_*`
-env vars; the pre-commit hook runs in git's own context and *does* see
-both (`-c` overrides land in effective config, and the hook reads the
-env vars explicitly for both the author and committer roles). Conversely,
+(`git -C <repo> config --get user.email`) and also *env-var* overrides
+(`GIT_AUTHOR_* / GIT_COMMITTER_*`) as defense-in-depth for the case-f-class
+scenario where `core.hooksPath` is unset or the `.githooks/` symlinks are
+missing — see case (h). The one-shot `-c user.email=…` override that lands
+in effective config only is caught by the pre-commit hook (which runs in
+git's own context and sees `-c` overrides), not by the wrapper. Conversely,
 subcommands the wrapper enforces on (e.g. `commit-tree`, `pull`, `notes`,
 `update-ref`, `replace`) do not fire pre-commit. When either
 `core.hooksPath` is unset *or* the wrapper is not sourced into the shell,
-the `-c` / env-var override path and the ref-write path become unguarded.
-Preserve both layers.
+the `-c` override path and the ref-write path become unguarded, so both
+layers must stay installed. Preserve both layers.
 
 > **Cross-domain isomorphism.** L4's "wrapper attach-point defined but
 > workload bypasses it unless shell-init sources the shim" is the git-
@@ -114,7 +115,7 @@ Preserve both layers.
 > delivery as a runtime-path gate (not a spec-only claim) is therefore
 > a project-wide discipline, not a wrapper-specific quirk.
 
-## 4. Seven-Case Self-Test
+## 4. Eight-Case Self-Test
 
 Run before opening a PR that touches any commit-gate artifact:
 
@@ -129,8 +130,9 @@ hooks/self-test/run-all.sh
 | c    | Clean message passes through unchanged              | L2    |
 | d    | **[LOAD-BEARING]** commit under `wenbo.zhang@iomesh.com` via `[--local]` refused | L1 |
 | e    | push under `wenbo.zhang@iomesh.com` refused          | L3    |
-| f    | write from external cwd via wrapper refused         | L4    |
+| f    | write from external cwd via wrapper refused (stored-config attack) | L4 |
 | g    | **[LOAD-BEARING]** commit with `GIT_COMMITTER_*` envvar = ethercflow refused | L1 |
+| h    | wrapper envvar defense-in-depth: hooks disabled + `GIT_COMMITTER_*` envvar refused | L4 |
 
 **Cases (d) and (g) are the primary regression guards for the PR #111
 incident on two orthogonal attack surfaces.** Case (d) covers the
@@ -147,9 +149,18 @@ If case (d) or case (g) ever regresses, the gate has failed in the shape of
 the original incident via one of the two documented attack surfaces —
 treat any failure as a P0 revert signal.
 
-Case (f) is non-overlapping with (d)/(g): (d)/(g) block wrong-identity
-commits via the pre-commit hook, (f) blocks a cadence-external cwd write
-via the wrapper. All three must pass independently.
+Cases (f) and (h) together exercise the L4 wrapper on the two orthogonal
+attack axes that case-f-class scenarios (hooks disabled) expose. Case (f)
+pokes the stored-config path; case (h) pokes the env-var path. Without
+case (h) the wrapper's envvar read (fix-pass 2.1) is untested defensive
+code — if case (h) regresses, a cadence-external invocation with an
+ethercflow committer envvar would silently pass L4 even though stored
+config is clean Adrian.
+
+Case (f) and case (h) are non-overlapping with (d)/(g): (d)/(g) block
+wrong-identity commits via the pre-commit hook, (f)/(h) block cadence-
+external cwd writes via the wrapper with hooks disabled. All four must
+pass independently.
 
 ## 5. Appendix — Preflight BLOCK RCA
 

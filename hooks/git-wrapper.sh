@@ -108,19 +108,42 @@ if [[ ! -f "$repo_root/Cargo.toml" ]] || ! grep -q '^name = "wperf"' "$repo_root
     exec "$REAL_GIT" "$@"
 fi
 
-name="$("$REAL_GIT" -C "$repo_root" config --get user.name 2>/dev/null || true)"
-email="$("$REAL_GIT" -C "$repo_root" config --get user.email 2>/dev/null || true)"
+stored_name="$("$REAL_GIT" -C "$repo_root" config --get user.name 2>/dev/null || true)"
+stored_email="$("$REAL_GIT" -C "$repo_root" config --get user.email 2>/dev/null || true)"
 
-if [[ "$name" != "$ADRIAN_NAME" || "$email" != "$ADRIAN_EMAIL" ]]; then
-    printf '\ngit-wrapper: refusing "git %s" — identity mismatch\n' "$subcommand" >&2
+# Defense-in-depth: the hook layers (L1/L3) also read GIT_AUTHOR_* /
+# GIT_COMMITTER_* envvars, but case-f (and any scenario that disables
+# core.hooksPath or removes the .githooks symlinks) runs wrapper-only.
+# Without the envvar check here, a cadence-external invocation with an
+# ethercflow committer envvar would pass L4 even though stored config
+# is clean Adrian. Validate all three effective identities.
+author_name="${GIT_AUTHOR_NAME:-$stored_name}"
+author_email="${GIT_AUTHOR_EMAIL:-$stored_email}"
+committer_name="${GIT_COMMITTER_NAME:-$stored_name}"
+committer_email="${GIT_COMMITTER_EMAIL:-$stored_email}"
+
+fail_wrapper() {
+    local role="$1" n="$2" e="$3"
+    printf '\ngit-wrapper: refusing "git %s" — %s identity mismatch\n' "$subcommand" "$role" >&2
     printf '  repo:       %s\n' "$repo_root" >&2
-    printf '  effective:  %s <%s>\n' "${name:-<unset>}" "${email:-<unset>}" >&2
+    printf '  role:       %s\n' "$role" >&2
+    printf '  effective:  %s <%s>\n' "${n:-<unset>}" "${e:-<unset>}" >&2
     printf '  expected:   %s <%s>\n' "$ADRIAN_NAME" "$ADRIAN_EMAIL" >&2
     printf '\nrun inside the worktree:\n' >&2
     printf '  git config --local user.name  "%s"\n' "$ADRIAN_NAME" >&2
     printf '  git config --local user.email "%s"\n' "$ADRIAN_EMAIL" >&2
     printf '\nsee docs/process/commit-hygiene.md Appendix "Preflight BLOCK RCA".\n' >&2
     exit 1
+}
+
+if [[ "$stored_name" != "$ADRIAN_NAME" || "$stored_email" != "$ADRIAN_EMAIL" ]]; then
+    fail_wrapper "stored" "$stored_name" "$stored_email"
+fi
+if [[ "$author_name" != "$ADRIAN_NAME" || "$author_email" != "$ADRIAN_EMAIL" ]]; then
+    fail_wrapper "author" "$author_name" "$author_email"
+fi
+if [[ "$committer_name" != "$ADRIAN_NAME" || "$committer_email" != "$ADRIAN_EMAIL" ]]; then
+    fail_wrapper "committer" "$committer_name" "$committer_email"
 fi
 
 exec "$REAL_GIT" "$@"
