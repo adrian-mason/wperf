@@ -62,10 +62,10 @@ while [[ $i -le $# ]]; do
         -C*)
             target_dir="${arg#-C}"
             ;;
-        -c|--namespace|--git-dir|--work-tree|--super-prefix|--exec-path|--list-cmds)
+        -c|--config-env|--namespace|--git-dir|--work-tree|--super-prefix|--exec-path|--list-cmds)
             i=$((i + 1))
             ;;
-        -c=*|--namespace=*|--git-dir=*|--work-tree=*|--super-prefix=*|--exec-path=*)
+        -c=*|--config-env=*|--namespace=*|--git-dir=*|--work-tree=*|--super-prefix=*|--exec-path=*)
             ;;
         -*)
             ;;
@@ -79,7 +79,7 @@ done
 subcommand="${subcommand:-}"
 
 case "$subcommand" in
-    commit|merge|rebase|cherry-pick|revert|tag|push|am|apply|stash|notes|update-ref|replace)
+    commit|commit-tree|merge|rebase|cherry-pick|revert|tag|push|pull|am|apply|stash|notes|update-ref|replace)
         enforce=1
         ;;
     *)

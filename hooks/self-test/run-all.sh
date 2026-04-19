@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hooks/self-test/run-all.sh — Execute all 6 regression cases (a–f) for the
+# hooks/self-test/run-all.sh — Execute all 7 regression cases (a–g) for the
 # Item 10 commit gate.
 #
 # Cases:
@@ -8,9 +8,13 @@
 #   c = clean base passthrough          (commit-msg / dedup-trailers.sh)
 #   d = wenbo email commit BLOCK        (pre-commit / check-git-identity.sh)
 #                                        LOAD-BEARING primary regression guard
-#                                        for PR #111 incident
+#                                        for PR #111 incident ([--local] path)
 #   e = wenbo email tag+push BLOCK      (pre-push / check-git-identity.sh)
 #   f = cadence-external wrapper BLOCK  (git-wrapper.sh)
+#   g = GIT_COMMITTER_* envvar BLOCK    (pre-commit / check-git-identity.sh)
+#                                        LOAD-BEARING envvar-path complement
+#                                        to case (d) — PR #111 same-shape via
+#                                        committer env-var attack surface
 #
 # Usage:
 #   hooks/self-test/run-all.sh
@@ -43,13 +47,13 @@ run_case() {
     fi
 }
 
-for c in a b c d e f; do
+for c in a b c d e f g; do
     run_case "$c"
 done
 
 printf '\n--- summary ---\n'
-printf 'pass: %d / 6\n' "$PASS"
-printf 'fail: %d / 6\n' "$FAIL"
+printf 'pass: %d / 7\n' "$PASS"
+printf 'fail: %d / 7\n' "$FAIL"
 
 if [[ $FAIL -ne 0 ]]; then
     printf 'failed: %s\n' "${FAILED_CASES[*]}" >&2
