@@ -46,10 +46,21 @@ Inputs: current `origin/main`, `pre-rewrite-snapshot` tag.
 Outputs:
 - `gamma-0-expected-main-sha.txt` — the SHA pinned as
   `EXPECTED_MAIN_SHA`; every subsequent layer verifies git state against it.
-- `gamma-0-identity-matrix.txt` — 6-echo matrix emitted by
-  `hooks/preflight-identity.sh` for the two active worktrees plus the
-  pre-rewrite-snapshot checkout. Confirms the machine's baseline is
-  understood before the rewrite starts.
+- `gamma-0-identity-matrix.txt` — the concatenation of three 3-line /
+  6-field matrices emitted by `hooks/preflight-identity.sh`, one per
+  context: the two active worktrees plus the `pre-rewrite-snapshot`
+  checkout. Confirms the machine's baseline is understood before the
+  rewrite starts.
+
+Execution flow (explicit, to avoid the single-cwd gotcha):
+
+```
+{
+  cd <worktree-1>                     && hooks/preflight-identity.sh
+  cd <worktree-2>                     && hooks/preflight-identity.sh
+  cd <pre-rewrite-snapshot-checkout>  && hooks/preflight-identity.sh
+} > gamma-0-identity-matrix.txt
+```
 
 Gate: `git rev-parse origin/main == EXPECTED_MAIN_SHA` must hold at the
 moment the rewrite is launched. Any drift aborts γ.

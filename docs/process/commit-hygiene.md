@@ -26,6 +26,12 @@ the per-repo override was never set. The Item 10 commit gate closes that
 gap with four independent enforcement layers, any one of which will refuse
 the write.
 
+> **Terminology.** Throughout this document, `hooks/preflight-identity.sh`
+> emits a **3-line / 6-field matrix** — one line per scope
+> (`[--global]` / `[--local]` / `[effective]`), each line exposing
+> `user.name` and `user.email` (3 × 2 = 6 fields). Any prior references
+> to "3-echo" or "6-echo" refer to the same artefact under this name.
+
 ## 2. Onboarding Paths
 
 ### PRIMARY — cadence worktree
@@ -38,10 +44,15 @@ git config --local user.name  "Adrian Mason"
 git config --local user.email "258563901+adrian-mason@users.noreply.github.com"
 git config --local core.hooksPath .githooks
 hooks/preflight-identity.sh --strict
+# Source the shell-init shim so L4 (git-wrapper) is active in this shell.
+# Bash/zsh:   source hooks/wrapper.bash
+# Fish:       source hooks/wrapper.fish
 ```
 
 This is the supported path and the only one the reviewer team validates.
-The `--strict` preflight run must exit 0 before the first commit.
+The `--strict` preflight run must exit 0 before the first commit. The
+shell-init shim step is what makes L4 actually intercept `/usr/bin/git`
+invocations; without it the wrapper exists on disk but nothing calls it.
 
 ### SECONDARY — manual clone (use only when cadence is unavailable)
 
@@ -52,13 +63,24 @@ git config --local user.name  "Adrian Mason"
 git config --local user.email "258563901+adrian-mason@users.noreply.github.com"
 git config --local core.hooksPath .githooks
 hooks/preflight-identity.sh --strict
+# Source the shell-init shim (same as PRIMARY).
+# Bash/zsh:   source hooks/wrapper.bash
+# Fish:       source hooks/wrapper.fish
 ```
 
 Missing any line in the secondary path is what PR #111 hit — the manual
 clone fell through to the global `[--global] = ethercflow` baseline. The
-preflight call is mandatory, not optional.
+preflight call and the wrapper source step are mandatory, not optional.
 
 ## 3. The Four Hook Layers
+
+> **Namespace note.** The labels `L1 / L2 / L3 / L4` in this section
+> refer to the four hook / wrapper **enforcement implementation points**.
+> The `L0 / L1(a) / L1(b) / L2` labels in Appendix §5 refer to the
+> canonical **RCA framework** maintained in
+> `feedback_git_identity_runtime_path.md` §A. The two label sets occupy
+> different dimensions and must not be conflated — a regression in either
+> is independent of the other.
 
 | Layer | Hook        | Script                        | What it refuses                          |
 |-------|-------------|-------------------------------|------------------------------------------|
@@ -71,6 +93,23 @@ Under Q3=A all four layers are mandatory — no layer is "belt and
 suspenders optional". L4 in particular is the only defence for the
 `git -C <wperf>` invocation path from an unrelated cwd, which bypasses
 `core.hooksPath` entirely unless the wrapper is sourced from shell init.
+
+**L1 ↔ L4 are mutual backstops.** The wrapper reads *stored* config
+(`git -C <repo> config --get user.email`) and therefore does not see a
+one-shot `-c user.email=…` override; the pre-commit hook runs in git's
+own context and *does* see `-c` overrides. Conversely, subcommands the
+wrapper enforces on (e.g. `notes`, `update-ref`, `replace`) do not fire
+pre-commit. When either `core.hooksPath` is unset *or* the wrapper is
+not sourced into the shell, the `-c` override path and the ref-write
+path become unguarded. Preserve both layers.
+
+> **Cross-domain isomorphism.** L4's "wrapper attach-point defined but
+> workload bypasses it unless shell-init sources the shim" is the git-
+> identity instantiation of `feedback_git_identity_runtime_path.md` §B
+> row 3 — the same *runtime-path-connectivity* failure mode that the
+> BPF-probe domain fixes with `losetup --direct-io=on`. Treating L4
+> delivery as a runtime-path gate (not a spec-only claim) is therefore
+> a project-wide discipline, not a wrapper-specific quirk.
 
 ## 4. Six-Case Self-Test
 
@@ -111,10 +150,14 @@ synchronised with that memory.
   for `git`? If a cadence-external shell invoked the real git directly,
   L4 (wrapper) does not fire and enforcement falls to L1–L3. If the
   wrapper is sourced, L0 hands off to L1(a).
-- **L1(a) — abstract context logic.** Does the invocation resolve into
-  a wperf worktree at all? The wrapper asks `git rev-parse --show-toplevel`
-  against the effective `-C` / `GIT_DIR` target, and reads the top-level
-  `Cargo.toml` for `name = "wperf"`. Non-wperf repos fall through.
+- **L1(a) — abstract identity selection logic.** Does the invocation
+  resolve into a wperf worktree at all? The wrapper asks
+  `git rev-parse --show-toplevel` against the effective `-C` / `GIT_DIR`
+  target, and reads the top-level `Cargo.toml` for `name = "wperf"`.
+  Non-wperf repos fall through. The label matches
+  `feedback_git_identity_runtime_path.md` §A top-level byte-for-byte;
+  the §E RCA-tag variant ("abstract rule wrong or missing") is a
+  shorthand, not a rename.
 - **L1(b) — cadence implementation.** When the context is wperf, what is
   the effective `[--local] user.name / user.email` for that worktree?
   The wrapper reads `git -C <repo> config --get user.{name,email}` and

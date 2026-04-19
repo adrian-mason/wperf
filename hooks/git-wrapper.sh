@@ -79,7 +79,7 @@ done
 subcommand="${subcommand:-}"
 
 case "$subcommand" in
-    commit|merge|rebase|cherry-pick|revert|tag|push|am|apply|stash)
+    commit|merge|rebase|cherry-pick|revert|tag|push|am|apply|stash|notes|update-ref|replace)
         enforce=1
         ;;
     *)
