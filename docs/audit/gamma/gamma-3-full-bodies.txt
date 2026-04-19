@@ -1,0 +1,2236 @@
+>>>227c467152b1ea15c6e2fb83e8501d17cdbc3de2
+chore(gamma): γ.1 (w1) bundle — filter-repo callback + selftest + spec §2 L27-28 patch
+
+Atomic (w1) bundle locking spec↔implementation binding pre-γ.1 filter-repo
+execute. 5 artefacts:
+
+1. docs/decisions/gamma-post-audit-spec.md §2 L27-28 L1(a) robustness patch
+   per Probe msg=bde20112 §3 verbatim (5-way endorsed: Probe + Critic
+   msg=c3e0f8dd §1 + Challenger msg=14ee4bc5 §2 + Maestro msg=d1d15b5e §1
+   + Oracle msg=2b0ae7d3 §2 5th-voice endorse).
+
+2. scripts/gamma1_filter_repo.py — filter-repo callback canonical per
+   Challenger msg=8698f3cf §3 with Oracle msg=2b0ae7d3 §1 explicit
+   ordering (i)->(ii.a)->(ii.b)->(iii): strip Co-Authored-By (IGNORECASE);
+   strip non-Adrian Signed-off-by; dedup Adrian-canonical; inject if
+   missing. Applies author/committer rewrite per §2 L24-26.
+
+3. scripts/gamma1-selftest.sh — 5-case byte-level adversarial corpus
+   per Maestro msg=12535a11 §2. Pre-commit standalone run: 5/5 PASS.
+
+4. docs/audit/gamma/gamma-0-preflight-20260419T091516Z.txt — Challenger
+   γ.0 preflight artefact (msg=94f2ff56 §4 fold-request) with
+   independent 4-point + B-sub re-verify (9/9 PASS, origin-live).
+
+5. docs/audit/gamma/gamma-1-rewrite-plan-20260419T093107Z.txt — Maestro
+   pre-execute plan: EXPECTED_MAIN_SHA pin, rewrite scope (metadata-only
+   refs/heads/main), executor contract, γ.3 projections, rollback path.
+
+γ.0 PASS layers:
+- Challenger operational (msg=94f2ff56 §2-§4)
+- Critic spec-layer 4-anchor CONCUR (msg=94781711 §1)
+- Oracle authoritative ratify-receipt (msg=11b79352 §1)
+- Adrian B ruling (msg=fef999ac) + 5-way byte-fidelity
+
+Filename: scripts/gamma1_filter_repo.py (underscores) vs plan
+scripts/gamma1-filter-repo.py (dashes) — intentional, per Oracle
+msg=11b79352 §2 content>filename RULING precedent. Required for Python
+importability so selftest and filter-repo callback share single
+normalize_message source of truth.
+
+No origin-side mutation in this commit. γ.1 filter-repo execute + ε
+force-with-lease remain gated on reviewer stamps.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>b30964a0809d63f8d6c6c98d7f00ad33f9b4ae11
+Merge pull request #117 from adrian-mason/feat/step-0-commit-gate
+
+feat(hooks): β Step-0 Item 10 commit gate — four-layer identity enforcement
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>3ed16409bcfbeed33b10b63ae721d16aae07bafb
+fix(hooks): wrapper envvar defense-in-depth + case-h regression guard
+
+git-wrapper.sh now reads GIT_AUTHOR_* / GIT_COMMITTER_* envvars in
+addition to stored [--local] config, so a case-f-class scenario
+(hooks disabled, clean [--local], ethercflow committer envvar via
+cadence-external cwd) is refused by L4 instead of slipping through to
+the real git. This is the defense-in-depth layer that Oracle §5.1 and
+Probe §4 requested on top of the Critic §2.4 hook-side core fix.
+
+Case (h) is the direct regression guard: hooks disabled, stored Adrian,
+GIT_COMMITTER_* = ethercflow, wrapper from external cwd — asserts the
+wrapper refuses and stderr names the committer role specifically (so
+the stored-config or author-role check cannot mask a committer-role
+regression). Self-test count: 7 → 8 (a–h), commit-hygiene.md §4 updated
+and §3 L1↔L4 paragraph reworded to reflect the wrapper's envvar read.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>b436b56bdc74d7a64fffdedd073fd80c26697af6
+fix(hooks): close Gemini-exposed committer/pull/--config-env BLOCK items
+
+Gemini's auto-review on 776f9c3 exposed three pre-merge structural gaps
+that fix-pass 1 (0b586f9) did not cover:
+
+1. check-git-identity.sh (HIGH): only validated GIT_AUTHOR_* / user.*,
+   not GIT_COMMITTER_*. An attacker (or a mistaken contributor) setting
+   GIT_COMMITTER_NAME="Wenbo Zhang" with a clean author would still
+   record a commit under the ethercflow identity — same structural
+   shape as the PR #111 regression, on the orthogonal env-var axis.
+   Both roles are now validated; the fail() path reports which role
+   failed (author vs committer) for diagnostic clarity.
+
+2. git-wrapper.sh enforce set: added pull and commit-tree. git pull
+   can produce merge commits and git commit-tree is the plumbing that
+   tooling scripts use to write commit objects directly.
+
+3. git-wrapper.sh global-options parser: --config-env takes an
+   argument; without it the wrapper treated --config-env as the
+   subcommand and skipped enforcement on any git --config-env VAR=VAL
+   <write-op> invocation.
+
+New case (g) LOAD-BEARING envvar-committer regression guard:
+keeps [--local] clean (Adrian) but invokes commit with
+GIT_COMMITTER_* = ethercflow, asserts the hook blocks the commit AND
+fires specifically on the committer role (so the author-side block
+can't mask a committer regression). Run-all bumped to 7/7; case (d)
+and case (g) are co-equal P0 regression guards on two attack surfaces.
+
+commit-hygiene.md §3 L1↔L4 mutual-backstop paragraph updated to call
+out env-var coverage explicitly; §4 self-test table expanded to seven
+cases with case (g) flagged LOAD-BEARING.
+
+7/7 self-test PASS locally.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>0b586f9127f651742a6f4bad4aec88296466392a
+fix(hooks,docs): absorb 6 WARNING + 1 CONCERN from β PR #117 reviewers
+
+Same review window fix-pass for Challenger §3.A-D + Oracle §2-3 + Critic
+QUESTION 1 + Probe §1 — all non-BLOCK, but Oracle §1 made (a/b/c) of §3.D
+into conditional-BLOCK triggers, so this commit covers every trigger.
+
+Self-test: 6 / 6 PASS locally after the fix-pass.
+
+Changes:
+
+1. hooks/git-wrapper.sh — enforce set now covers `notes | update-ref |
+   replace` in addition to `commit | merge | rebase | cherry-pick |
+   revert | tag | push | am | apply | stash` (Challenger §3.A — ref-
+   write paths were the unguarded `-c user.email=…` override surface).
+
+2. hooks/preflight-identity.sh — header comment says "3-line / 6-field
+   matrix" (was the ambiguous 3-echo / 6-echo mix). The canonical
+   terminology block in commit-hygiene.md §1 ties the three names
+   together so future references do not re-drift.
+
+3. docs/decisions/gamma-post-audit-spec.md γ.0 — explicit 3-context
+   execution flow block `{ cd wt1 && preflight; cd wt2 && preflight;
+   cd snapshot && preflight } > gamma-0-identity-matrix.txt` to kill
+   the single-cwd gotcha (Challenger §3.B).
+
+4. docs/process/commit-hygiene.md — (a) §1 "3-line / 6-field matrix"
+   terminology block, (b) §2 PRIMARY / SECONDARY onboarding paths both
+   gain a `source hooks/wrapper.{bash,fish}` line, (c) §3 dual-namespace
+   note disambiguating the `L1 / L2 / L3 / L4` implementation labels
+   from the canonical `L0 / L1(a) / L1(b) / L2` RCA labels (Critic §2),
+   (d) §3 L1↔L4 mutual-backstop paragraph (Challenger §3.A secondary),
+   (e) §3 cross-domain isomorphism callout linking L4 runtime-path
+   connectivity to memory §B row 3 (Challenger §2 low-cost ask),
+   (f) §5 Appendix L1(a) descriptor reverted to §A-canonical
+   "abstract identity selection logic" (Probe §1 CONCERN; eliminates
+   §A / §E descriptor drift while the §E shorthand remains documented
+   inline).
+
+5. hooks/self-test/case-d.sh — stderr positive control: the test now
+   asserts *both* that the commit exited non-zero *and* that stderr
+   carries the `identity check FAILED` line from `check-git-identity.sh`.
+   Without the grep, an unrelated future regression (e.g. a broken
+   hooksPath wiring in setup_repo) could produce a false-PASS that
+   masks a PR #111-shaped identity failure (Challenger §3.C).
+
+6. hooks/wrapper.bash + hooks/wrapper.fish — shell-init shims that
+   activate L4 in the user's interactive shell. Without these, the
+   wrapper script exists on disk but `/usr/bin/git` is invoked
+   directly and L4 never fires — same failure class as a tmpfs-direct
+   BPF fixture where the probe attach is defined but the workload
+   bypasses the attach point (Challenger §3.D / Oracle §1
+   conditional-BLOCK trigger (a) / Probe §2 cross-domain isomorphism
+   reinforcement / Critic §8 clarification).
+
+PR body #3 sub-item #5 was also updated via `gh pr edit 117`: the
+enforcement grep pattern changed from `'^\*\*L[0-9]'` (which matches
+zero lines against the list-item Appendix form `- **L0 — …`) to
+`'\*\*L[0-9]'`. 4-way converged finding (Oracle WARNING #1 + Critic
+QUESTION 1 + Challenger §2 self-flag + Probe tail-check note).
+
+Deferred to post-β fast-follow:
+- case (f') shim-active variant (bare `git commit` after sourcing
+  wrapper.bash) — enhancement, non-BLOCK, Probe §2 + Challenger §4
+  marginal endorse.
+- Memory §A / §E L1(a) descriptor reconcile — post-β Probe-owned
+  memory edit, not a PR fix.
+
+Refs #116.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>776f9c393bbd8140459f9728c677cbdc2435e47b
+feat(hooks): Item 10 commit gate — four-layer identity enforcement + 6-case self-test
+
+Closes the PR #111 regression by installing a per-repo commit gate that
+refuses any write performed under the machine's baseline ethercflow
+identity. Adrian's Q3=A ruling keeps the ~/.gitconfig user = Wenbo Zhang
+as design intent (correct for the ethercflow repo that shares this
+machine); enforcement for wperf lives entirely in the per-repo
+[--local] override plus the four hook/wrapper layers.
+
+Layers:
+  L1 pre-commit   hooks/check-git-identity.sh
+  L2 commit-msg   hooks/dedup-trailers.sh (refactored from .githooks/)
+  L3 pre-push     hooks/check-git-identity.sh
+  L4 git-wrapper  hooks/git-wrapper.sh (cwd-aware, handles -C <dir> case-f)
+
+Dogfood: this commit itself passes the L1 + L2 hooks under
+core.hooksPath = .githooks, with the [--local] override set to Adrian
+before the first staged file.
+
+Self-test: hooks/self-test/run-all.sh exercises six regression cases —
+  (a) Co-Authored-By strip
+  (b) Signed-off-by dedup
+  (c) clean base passthrough
+  (d) wenbo-email commit BLOCK (LOAD-BEARING primary regression guard)
+  (e) wenbo-email push BLOCK
+  (f) cadence-external cwd wrapper BLOCK
+Case (d) is the explicit PR #111 incident reproducer — any regression
+here is a P0 revert signal.
+
+Docs:
+  docs/process/commit-hygiene.md — onboarding (PRIMARY cadence /
+    SECONDARY manual) + Appendix "Preflight BLOCK RCA" with the
+    canonical L0 / L1(a) / L1(b) / L2 naming locked to
+    feedback_git_identity_runtime_path.md §A.
+  docs/decisions/gamma-post-audit-spec.md — three-layer post-hoc audit
+    spec for the γ filter-repo rewrite, pre-authorised under Adrian's
+    Q4=A P9(ii) parallel post-hoc structure.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>cd8870943618bf0be433fdd3aa874aecb0c6d4ab
+P2a-03: Spurious wakeup filter (§2.5) (#111)
+
+* feat: spurious wakeup filter with deferred edge commit (§2.5)
+
+Implements noise edge pruning per spec §2.5. Edges are deferred at
+switch-in and committed or discarded at the thread's next switch-out
+based on on-CPU duration (< 50μs = spurious). Adds CLI flag
+--spurious-threshold-us, wires false_wakeup_filtered_count to health
+metrics, and includes 9 new tests covering spurious/boundary/preempted/
+exit/condvar/multi-thread/threshold-zero scenarios.
+
+Closes #36
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+* fix: revert if-let chain to nested if for rustfmt compatibility
+
+CI uses Rust 1.94 rustfmt which formats if-let chains differently.
+Revert to nested if with clippy allow attribute.
+
+
+* fix: rename off_cpu_ns/off_cpu_ms to avoid clippy::similar_names
+
+
+---------
+
+>>>7a5293dbde281a45346f9c5a7325bbdc432df381
+Merge pull request #110 from adrian-mason/phase2a/wait-type-annotation
+
+feat: wait_type annotation on WFG edges (P2a-02)
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>a63894aea22bdf39afe87a52b7af629de45f2011
+refactor: deduplicate EdgeWeight constructor per Gemini review
+
+with_wait_type() now delegates to new() to avoid duplicating
+raw_wait_ms/attributed_delay_ms calculation.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>78f0a78739a89044288b461c4ff25576068590bf
+fix: add FUTEX_CORRELATION_WINDOW_NS to discard stale pending futex
+
+A futex returning -EAGAIN leaves a pending entry that could incorrectly
+annotate a subsequent IO block. Add 1ms proximity window between
+sys_enter_futex and sched_switch to discard stale entries.
+
+Addresses Challenger C2 review — concrete attack scenario: futex
+returns immediately, thread later blocks on read(), edge mis-annotated.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>512fc3eeaf9cbf8a901ee73e2ee57e121cf43df6
+feat: wait_type annotation on WFG edges (P2a-02)
+
+Correlate FutexWait events from sys_enter_futex to sched_switch edges,
+annotating each edge with its wait cause (futex_wait, futex_lock_pi,
+futex_wait_bitset, futex_wait_requeue_pi, or null if not traced).
+
+Uses Option<WaitType> to distinguish "not traced" (None) from "traced
+but unmatched" — addresses Challenger C4 review feedback.
+
+Closes #35
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>d580c79bb40e516ee3af6fb0ca6f77ed9d5abcbb
+feat: sys_enter_futex tracepoint probe (P2a-01) (#109)
+
+* feat: sys_enter_futex tracepoint probe (P2a-01)
+
+Add BPF tracepoint probe for sys_enter_futex to capture futex wait
+operations (FUTEX_WAIT, FUTEX_WAIT_BITSET, FUTEX_LOCK_PI). This provides
+the data source for Phase 2a wait_type edge annotation.
+
+BPF: single SEC("tracepoint/syscalls/sys_enter_futex") handler — standard
+tracepoint ABI, no dual-variant needed. Gated by const volatile bool
+enable_futex_tracing. Self-tgid filter reuses PR #106 pattern.
+
+Rust: EventType::FutexWait variant, futex_uaddr()/futex_op() accessors,
+rodata feature flag wiring, correlate skip arm.
+
+Field mapping in 40-byte wperf_event: prev_tid=uaddr_lo,
+next_tid=uaddr_hi, flags=futex_op.
+
+Authoritative inputs: final-design.md §2.1, ADR-013 line 177.
+
+Closes #34
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+* style: fix cargo fmt whitespace in futex test
+
+
+* fix: address Challenger review — RODATA comment + FUTEX_WAIT_REQUEUE_PI
+
+- Fix BSS→RODATA comment on enable_futex_tracing (const volatile → .rodata)
+- Add FUTEX_WAIT_REQUEUE_PI (op 11) to BPF filter, wperf.h, and Rust futex_op
+  module — used by pthread_cond_wait with PI mutexes
+
+
+* fix: add #ifndef guards to futex constants in wperf.h
+
+Defensive measure per Gemini review — vmlinux.h (BTF dump) doesn't
+define these macros today, but guards are zero-cost insurance.
+
+
+---------
+
+>>>6bbc319e4cd1be6a389b2b1c6e239ad242fdb900
+Merge pull request #108 from adrian-mason/test/cross-kernel-e2e
+
+test: W4 #25 cross-kernel E2E (dual-kernel CI)
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>d2bb4e8c55897696c13244e86daa05b15aa2c4d3
+fix: isolate cargo cache per OS in cross-kernel workflow
+
+Prevents glibc version mismatch when ubuntu-22.04 and ubuntu-24.04
+share a cache key — libbpf-sys compiled against glibc 2.38+ fails
+to link on ubuntu-22.04 (glibc 2.35).
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>317a7256a9a7430d44caf2ea348862764db0e252
+fix: address Gemini review on cross-kernel E2E script
+
+- cleanup trap: kill background workload + remove RECORD_STDERR on exit
+- prereq check: verify gcc and jq before proceeding
+- fix drop_count JSON path: .health.drop_count (not .stats.drop_count)
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>e24ab752572918d2a3def08d7c3f74056a50504f
+fix: mark cross-kernel E2E script executable
+
+sudo needs +x to invoke the script directly.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>dfbb8eee0aab521ac621e51c95fb202d0e26c75a
+test: W4 #25 cross-kernel E2E CI workflow
+
+Dual-kernel matrix (ubuntu-22.04 kernel 5.15 + ubuntu-24.04 kernel 6.8)
+validates BPF CO-RE relocations across kernel versions. Smoke test verifies
+full record→report pipeline: skeleton loads, probes attach, events captured,
+cascade graph built, health invariants pass.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>429d0a03a5776ffc804d0a72bc35cb3225f65444
+perf: BPF PID filter to break observer-effect feedback loop (#106)
+
+* perf: BPF PID filter to break observer-effect feedback loop
+
+Profiling showed 52% of wperf's CPU is kernel scheduler overhead from
+its own sleep/wake cycles triggering its own BPF probes. Add self_tgid
+BSS variable set by userspace before load(); all 4 probe handlers
+(tp_btf and raw_tp variants of sched_switch + sched_wakeup) early-return
+when prev/next/waker/wakee TGID matches wperf's own process.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+* perf: lower calibration threshold to 10K events/sec
+
+The 100K threshold was calibrated when wperf's self-observation feedback
+loop inflated event counts ~15×. With the BPF PID filter eliminating
+93% of self-generated events, real system event rates from stress-ng
+are ~28K/sec. 10K is sufficient to confirm scheduling pressure.
+
+
+* spec: correct §6.7 overhead threshold from 100K to 10K events/sec
+
+Oracle-approved amendment: the original 100K figure included ~93%
+feedback-loop amplification from profiler self-observation. Actual
+system event rate from stress-ng --matrix 64 is ~28K/sec. Lowered to
+10K to reflect real scheduling pressure excluding self-observation.
+
+
+* perf: write path optimizations for remaining ~4% CPU overhead
+
+Now that BPF PID filter eliminated the 52% scheduler bottleneck, the
+write path is the remaining cost (~5% per profiling). Three changes:
+- Combined TLV header + event payload into single 45-byte write_all
+- Increased crash recovery interval from 1024 to 8192 events (8× fewer
+  seek-triggered BufWriter flushes; spec §4.4 has no granularity SLA)
+- Increased BufWriter capacity to 1 MiB (fewer flush syscalls)
+
+
+* perf: zero-copy ringbuf write path — skip from_bytes/to_bytes roundtrip
+
+The ringbuf callback was parsing 40 raw BPF bytes into a WperfEvent
+struct then re-serializing them back to the same 40 bytes for TLV
+writing. Add write_event_raw() that takes raw wire-format bytes
+directly, extracting only the 8-byte timestamp for bookkeeping.
+Eliminates ~20 field extractions + ~20 field serializations per event.
+
+
+* perf: replace epoll-based poll with consume + sleep to reduce kernel overhead
+
+Fresh profiling showed ~2% wall-time CPU from per-poll epoll_wait
+overhead (do_epoll_wait, ep_item_poll, scheduler wake/sleep). Replace
+ringbuf.poll() with ringbuf.consume() (non-blocking drain) + explicit
+50ms sleep when buffer is empty. Eliminates the epoll path entirely.
+Also increases perfarray poll timeout to 500ms for consistency.
+
+
+* fix: CI failures — formatting, mutation test coverage, Gemini feedback
+
+- Run cargo fmt to fix formatting in build.rs and record.rs
+- Add tests for write_event_raw: output equivalence with write_event,
+  timestamp tracking, and crash recovery offset updates
+- Hoist bpf_get_current_pid_tgid() before filter check in wakeup
+  handlers to eliminate redundant call (Gemini code review feedback)
+
+
+* fix: pending buffer drain, PID namespace correctness (Gemini feedback)
+
+- Drain pending buffer before reorder.drain() in perfarray final drain,
+  preventing silent event loss from last perf.poll() call
+- Add global_tgid() reading /proc/self/status NSpid for PID namespace
+  correctness — BPF probes see init-namespace TGID, not namespace-local
+- Restore missing TransportConfig import
+
+
+* process: add Directive 6 merge prerequisites to PR template
+
+Oracle Directive 6: CI green + external reviewer comments addressed +
+Adrian-Mason approval required before merge. Adds these as explicit
+checklist items alongside existing review items.
+
+
+* fix: clippy — backtick doc items, collapse nested if-let chain
+
+
+---------
+
+>>>852ae6446253ee0e92b858e61ed68aafeb630141
+infra: vendor vmlinux.h for CI BPF builds (Task #28) (#107)
+
+* infra: vendor vmlinux.h for CI BPF builds (Task #28)
+
+build.rs panicked on bpftool btf dump in CI (GitHub Actions runners
+lack linux-tools), blocking all BPF PRs. Add vendored vmlinux.h from
+kernel 6.18.21-1-lts and fall back to it when bpftool is unavailable.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+* style: fix pre-existing cargo fmt issues in record.rs
+
+Now caught by CI because vmlinux.h vendoring unblocks BPF compilation.
+
+
+* fix: rename vendored vmlinux.h to avoid clang shadowing (Gemini)
+
+clang #include "vmlinux.h" searches the source file's directory first,
+so src/bpf/vmlinux.h always shadowed the OUT_DIR copy — even when
+bpftool generated a kernel-exact header. Renamed to .vendored, removed
+staleness guard, swapped -I order so OUT_DIR is searched first.
+
+
+* fix: resolve pre-existing clippy warnings with BPF feature enabled
+
+Now that CI can compile BPF code, clippy catches: unsafe i64→u32 cast
+in page_size, unbackticked PerfBuffer in doc, unused PathBuf import
+(gated behind cfg(not(bpf))), too_many_lines on record_impl.
+
+
+* fix: exclude BPF-gated record functions from mutation testing
+
+With vmlinux.h vendoring, cargo-mutants now sees BPF-gated code paths
+(record_impl, poll_ringbuf, poll_perfarray) that require root + BPF to
+test. These produced false MISSED results, dropping kill rate from ~90%
+to 84%. Exclude them alongside existing probe function exclusions.
+
+
+* ci: re-trigger after stuck mutation testing runner
+
+Previous run hung for 8+ hours on a GitHub Actions runner.
+406 mutants × 300s timeout × j2 = 42min expected. Re-trigger.
+
+
+* ci: reduce mutation testing timeout and increase parallelism
+
+Previous runs hung for 8+ hours: 406 mutants × 300s timeout ÷ 2
+parallel = 17h worst case. Reduce timeout to 120s (caught mutants
+fail in <10s) and bump parallelism to 4 jobs.
+
+
+* fix: handle sysconf error and ensure power-of-two perf pages (Gemini)
+
+Check sysconf(_SC_PAGESIZE) for error return (-1) instead of blindly
+casting, and use next_power_of_two() for perf buffer page count as
+required by libbpf.
+
+
+* fix: use ceiling division for perf buffer page count (Gemini)
+
+Integer division truncates, so a requested buffer size that isn't a
+multiple of page_size would under-allocate pages. Use div_ceil() to
+round up before applying next_power_of_two().
+
+
+* fix: guard against empty bpftool output and improve sysconf error msg (Gemini)
+
+- build.rs: filter out empty bpftool stdout before writing vmlinux.h,
+  so missing kernel BTF falls through to the vendored copy instead of
+  creating an empty file.
+- record.rs: use a descriptive error message for sysconf failure
+  instead of last_os_error() which could misleadingly say "Success"
+  when sysconf returns 0.
+
+
+* build: use CARGO_MANIFEST_DIR for absolute paths in build script
+
+Address Gemini review feedback — relative paths in build scripts are
+fragile since cwd is not strictly guaranteed by Cargo.
+
+
+* mutants: remove register_signal_handlers from exclusion list
+
+Not BPF-gated — standard signal_hook logic, testable without
+privileges. Gemini review correctly identified the miscategorization.
+
+
+* ci: add timeout-minutes to mutation testing job
+
+Prevents infinite hangs from GitHub Actions runner stalls.
+Per-mutant --timeout=120 catches individual mutant hangs;
+job-level timeout-minutes: 45 catches runner-level stalls.
+
+
+---------
+
+>>>4a56b216228147be99371fe0e8cdf3216488a21a
+feat: W4 #23 overhead baseline validation (#105)
+
+* feat: W4 #23 overhead baseline script + Directive 5 PR template
+
+Add run_overhead_baseline.sh implementing the overhead measurement
+defined in final-design.md §6.7: stress-ng --matrix 64 (with fallback
+to --context 64 if <100K events/sec), pidstat process CPU over 60s,
+N≥3 runs, assert mean <3%. Excludes first/last pidstat samples to
+measure steady-state.
+
+Add Runtime Evidence section to PR template per Oracle Directive 5.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+* fix: correct drop_count jq path in overhead baseline script
+
+.stats.drop_count → .health.drop_count // 0
+
+
+* fix: parse record stderr in calibration phase instead of running report
+
+Calibration was running wperf report on 5s traces — slow for high
+event rates. Parse event count from record's stderr summary instead.
+
+
+* perf: reduce record pipeline CPU overhead
+
+Three changes to reduce userspace CPU during recording:
+
+1. BufWriter 8KB → 1MB: reduces write syscall frequency from ~2700/sec
+   to ~22/sec at 500K events/sec throughput.
+
+2. Crash recovery seek interval 1024 → 65536: each update_data_offset()
+   flushes BufWriter via seek. At 500K events/sec the old interval caused
+   ~488 forced flushes/sec. New interval: ~8/sec, losing at most ~3MB on
+   crash — acceptable for the recovery guarantee.
+
+3. Single write per event: combine TLV header (5B) + payload (40B) into
+   one 45B stack buffer and single write_all() call, eliminating per-event
+   BufWriter boundary checks.
+
+
+* Revert "perf: reduce record pipeline CPU overhead"
+
+This reverts commit af3e5b9ac7f800124cc90032c931abf02a2809b0.
+
+---------
+
+>>>7fdcf56f02b40602468f2feb9d0c2e2e4510b879
+fix: propagate write errors in perfarray poll loop (#104)
+
+* fix: propagate write errors in perfarray poll loop
+
+Silent `let _ = writer.write_event(ev)` dropped I/O errors and inflated
+event_count on failure. Use write_err capture pattern (matching ringbuf
+path) to stop on first error and report accurate counts.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+* fix: propagate write errors in perfarray poll loop
+
+Silent `let _ = writer.write_event(ev)` dropped I/O errors and inflated
+event_count on failure. Use RefCell<Option<io::Error>> capture pattern
+(consistent with pending/lost_count in same function and ringbuf path)
+to stop on first error and report accurate counts.
+
+Verified: cargo check --features bpf (compiles BPF-gated code path)
+
+
+---------
+
+>>>4ca18bf1998d31454e78ae57a36b7281e8f383b6
+fix: mutex_knot workload produces real futex contention for Knot E2E
+
+The original usleep-based design never generated kernel-level mutex
+contention — timer wakeups (waker=0) were filtered by the correlator,
+producing zero wait-for edges for the workload threads and 0 knots.
+
+Replace with busy-wait critical section + sched_yield + CPU pinning:
+- busy_wait_us(500) holds lock while RUNNING, forcing the other
+  thread into futex_wait (kernel sched_switch with prev_state != 0)
+- sched_yield() after unlock ensures fair turn-taking
+- Both threads pinned to CPU 0 so yield switches to the contender
+
+Verified: 1 knot with both workload TIDs, invariants_ok=true.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>9a7153474b1354009cc9317a9a78d914a87d530d
+feat: 2-thread mutex Knot E2E validation (W4 #22) (#103)
+
+Add synthetic 2-thread mutex contention workload and E2E validation
+script that records real BPF sched events, runs wperf report, and
+asserts Knot detection with workload TID filtering. No pipeline code
+changes — Knot detection was already fully wired.
+
+Reviewed-by: Critic (PASS), Challenger (PASS after F1 fix)
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>291512d3c1a68052235203c6dc176b8bfc7ff981
+feat: wire BPF record pipeline (Task A) (#102)
+
+Replace NotYetWired stub with complete record_impl() pipeline:
+probe_all() → skeleton open/configure/load/attach → dual ringbuf+perfarray
+poll loops → signal shutdown → drain → writer.finish(bpf_drops + transport_lost).
+
+Adds build.rs (SkeletonBuilder + vmlinux.h generation), libbpf-cargo
+build-dependency, and offset_of! assertions for all 11 WperfEvent fields.
+
+Reviewed-by: Critic (PASS), Challenger (PASS with 3 non-blocking findings)
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>776356dc971f217221b1bc2f1839a0c018c1fbb2
+Merge pull request #101 from adrian-mason/phase1/crash-recovery-tests
+
+feat: E2E crash recovery integration tests (W4 #24)
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>0c835610d7d4c0edbbbc414e91bb423843d6a471
+refactor: use 10-byte partial record to exercise truncated-payload branch
+
+Change offset-past-EOF truncation from 3 bytes (truncated TLV header)
+to 10 bytes (valid TLV header but incomplete payload), covering both
+reader mid-record truncation code paths across the test suite.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>e52c8fa9501efbec60a17c030eda6ea07cdebfb9
+refactor: change simulate_crash to take &mut [u8] instead of owned Vec
+
+Makes in-place mutation explicit and follows idiomatic Rust conventions
+for functions that modify data without changing its size.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>e55cbadac30cd4b9e3a6207d6cbf9e76caab0cd4
+refactor: use WprfHeader struct for crash recovery header patching
+
+Replace hardcoded byte offset constants with WprfHeader::from_bytes /
+to_bytes round-trip, making tests resilient to header layout changes.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>4492bfda2da7a4de9115e253ec606745ca34a832
+refactor: strengthen offset-past-EOF test with mid-record truncation
+
+Truncate at header + 1 event + 3 bytes (mid-record) instead of at a
+clean record boundary, exercising both clamp-to-file-length and partial
+record handling in a single test case.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>4192479cfa682829ff6337b929558a7cbc4c4448
+refactor: adopt Gemini suggestions — import crate constants, use simulate_crash helper
+
+Import HEADER_SIZE, TLV_HEADER_SIZE, EVENT_SIZE from crate instead of
+redefining locally. Use simulate_crash helper in offset-past-EOF test
+to eliminate duplicated header patching logic.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>4474ee299aa08cffdaee79b703c240ce6ce9ae2c
+Merge pull request #100 from adrian-mason/phase1/svg-generation
+
+feat: SVG generation via Graphviz dot (Phase 1 gate)
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>adfd2ef6e3a41f190e9c3b349b2ba9ee7d5bf1db
+feat: E2E crash recovery integration tests (W4 #24)
+
+Exercise the full build_report() pipeline against crash-recovered traces:
+record-boundary truncation, mid-record truncation, zero-event crash, and
+data_section_end_offset past physical EOF (clamp-to-file-length).
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>de5a2ced1045e92a2a68c195369af416c47dbd32
+prioritize GraphvizFailed over stdin BrokenPipe error
+
+Check dot's exit status before propagating stdin writer errors, so
+a BrokenPipe from dot closing its stdin doesn't mask the real
+GraphvizFailed error with stderr context.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>9f1afd8f1b227868750293c4e5b50df7ffd2bc91
+feat: fixture-driven integration tests (W3 #20) (#99)
+
+* feat: fixture-driven integration tests (W3 #20)
+
+Add 5 end-to-end integration tests that construct .wperf event streams,
+run the full pipeline via build_report(), and assert semantic properties:
+empty_trace, single_wait_edge, multi_hop_chain, unmatched_events,
+drop_count_propagation. Completes Phase 1 fixture replay test coverage.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+* fix: strengthen integration test assertions per Gemini review
+
+- Use distinct drop_count (42) to avoid coincidental match with event count
+- Assert attributed_delay_ms == raw_wait_ms for single-edge (no concurrent waits)
+- Verify edge weights in multi_hop_chain (raw_wait_ms = 5ms and 2ms)
+
+
+* tighten multi-hop critical path assertion to exact length
+
+Gemini suggested the `>= 2` assertion on `cp.chain.len()` is too weak for
+a deterministic 3-node linear chain — adopt exact `== 3` assertion.
+
+
+* improve test diagnostics: expect() over unwrap(), named constant
+
+Adopt Gemini suggestions:
+- Replace .unwrap() with descriptive .expect() in test helpers
+- Replace magic number prev_state=1 with TASK_INTERRUPTIBLE constant
+
+
+---------
+
+>>>b868f512b7006cbce5fd625f9cedb546e4dfc6f2
+fix potential stdin/stdout deadlock in render_svg
+
+Write DOT input to dot's stdin in a separate thread to prevent deadlock
+when both input and output exceed OS pipe buffer size (~64KB).
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>1e9f9003d470ae0259ae99c0795e7978f029b6ac
+add SVG generation via Graphviz dot for Phase 1 gate
+
+Implements `wperf report --format svg` by piping DOT output through
+external `dot -Tsvg`. Closes the Phase 1 "minimal SVG readable" gate.
+
+- ReportFormat::Svg CLI variant
+- render_svg() / render_svg_with_command() in dot.rs
+- ReportError::GraphvizNotFound and GraphvizFailed error variants
+- 4 new tests: missing command, failed command, valid SVG output
+- CI installs graphviz for SVG smoke tests
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>99ecdd0cb9352715fee1a4cda8563e0e14469395
+feat: DOT text backend for cascade visualization (W3 #19 partial) (#98)
+
+* feat: DOT text backend for cascade visualization (W3 #19 partial)
+
+Add dot module: CascadeResult → Graphviz DOT format with deterministic
+node/edge ordering and proper ID escaping. Wire --format dot into
+wperf report CLI. Includes unit tests + 3 DOT output snapshot tests.
+
+DOT-only — does not satisfy Phase 1 "minimal SVG readable" gate.
+SVG generation path is a separate follow-up task.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+* fix: use stable sort for DOT edge ordering determinism
+
+sort_unstable_by_key does not preserve upstream ordering for edges with
+the same (src, dst). Switch to sort_by_key to maintain CascadeResult's
+deterministic edge order for ties.
+
+
+* fix: use full-key sort for DOT edge determinism + regression test
+
+Replace sort_by_key(src, dst) with sort_unstable_by_key including
+attributed_delay_ms and raw_wait_ms, making render_dot() deterministic
+from its own input values without depending on upstream edge order.
+Add regression test for duplicate (src, dst) edges with different weights.
+
+
+* refactor: use ThreadId::Display for DOT node labels
+
+Pseudo-threads now show human-readable names (NIC, Disk, HardIRQ,
+SoftIRQ) instead of raw T-4, T-5 etc. Regular threads unchanged (T101).
+Removes redundant dot_escape_label helper.
+
+
+* refactor: simplify node collection with flat_map + sort + dedup
+
+Replace Vec::contains loop with flat_map + sort_unstable + dedup
+for collecting unique node IDs. More idiomatic and simpler code.
+
+
+---------
+
+>>>2000a3eac8703fd213fd41eca28d10661500f1fe
+feat: JSON report output snapshot tests (W3 #21) (#97)
+
+Add 4 insta snapshot tests covering ReportOutput JSON schema:
+empty_trace_report, single_edge_report, unmatched_wakeup_report,
+health_metrics_schema. Completes Phase 1 snapshot coverage for
+JSON output alongside existing .wperf parser snapshots.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>ebf3001537b98058d9cfd92a464423e56ad37b5e
+feat: wire actual health metrics into HealthMetrics (W3 #18) (#96)
+
+Promotes invariants_ok and unmatched_wakeup_count from nested pipeline
+stats to top-level HealthMetrics for self-contained health dashboard.
+Three deferred metrics remain null (not yet measured): partial_stack_count,
+cascade_depth_truncation_count, false_wakeup_filtered_count.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>bb36c47cf347e51465a2fc17984d44a5e10c8b72
+feat: insta snapshot tests for .wperf parser output (W2 #14) (#95)
+
+Adds insta snapshot infrastructure and 11 snapshot tests covering
+.wperf reader round-trip parsing: single switch/wakeup events, mixed
+multi-event traces, metadata with counts, empty finished trace,
+crash-recovery no-footer trace, and reader error Display strings.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>a81b0384cb61ce370a1aedbc7b76e498328bd997
+feat: wperf report JSON backend (W3 #17) (#94)
+
+* feat: add wperf report JSON backend (W3 #17)
+
+Phase 1 / W3 partial report: wires the full offline analysis pipeline
+(parse → sort → correlate → cascade → SCC → heuristic → critical path
+→ knot detection) and serializes JSON to stdout.
+
+Not the final §1.2 HTML report (Phase 3). Deferred health fields
+(partial_stack_count, cascade_depth_truncation_count,
+false_wakeup_filtered_count) serialized as null.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+* fix: propagate metadata read errors instead of silently swallowing
+
+build_report() was using .ok() on read_metadata(), which silently
+downgraded real errors (malformed footer, oversized payload, I/O) to
+drop_count: null. Crash-recovery (no footer) is already expressed as
+Ok(Metadata { drop_count: None }) by the reader, so propagating Err
+is correct. Also adds explicit match on args.format for future safety
+and a regression test for corrupted metadata.
+
+
+* fix: explicitly flush BufWriter before drop in report output
+
+BufWriter::drop silently ignores flush errors (broken pipe, disk full).
+Add explicit .flush()? to propagate I/O errors from final write.
+
+
+---------
+
+>>>2ebf77fe314e1251825260b57261e870572f4055
+feat: parse + sort + correlate pipeline glue (W2 #13) (#93)
+
+* feat: add parse + sort + correlate pipeline glue (W2 #13)
+
+Wire WperfReader → full-order sort → correlate_events into a single
+build_wait_for_graph() function. Uses WperfEvent's derived Ord for
+deterministic sorting (matching ReorderBuf's live-path semantics).
+
+Empty traces return Ok with empty graph — not a hard error.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+* fix: skip idle thread (tid 0) as waker in correlate
+
+Wakeup events with source=0 (kernel idle context) are not a real
+causal source. Previously they would create edges to ThreadId(0),
+violating the "idle ignored" policy. Now skipped in handle_wakeup.
+
+
+* perf: use sort_unstable() for event sorting in pipeline
+
+Events with identical Ord keys are semantically identical, so stability
+is unnecessary. sort_unstable() avoids allocation overhead.
+
+Addresses Gemini review comment on PR #93.
+
+
+---------
+
+>>>021ed32d18b02e661495a78f6982cd9ee7442ac8
+Merge pull request #92 from adrian-mason/phase1/correlate
+
+feat: event correlation sub-step (§3.2 correlate)
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>34cefa33fd8b13f69e8697e7c542ac8df1d67f5b
+revert: restore floor(delta) TimeWindow construction
+
+Reverts the independent endpoint truncation from 90238cc. Team review
+concluded that floor(delta_ns / 1e6) preserves raw_wait_ms accuracy,
+while independent truncation inflates wait times (e.g. 1.2ms → 2ms).
+Gemini suggestion rejected per Challenger/Probe/Critic consensus.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>90238ccea971cca7392a7422f74b1bda854621c4
+fix: derive TimeWindow endpoints from event timestamps directly
+
+Avoid truncation drift where independent floor(ns/1M) operations on
+duration vs timestamps produce inconsistent windows. Both start_ms
+and end_ms now come directly from their respective event timestamps.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>d59a16a14d9ce558bc334dd5c31f43bb00a8cfb8
+docs: align module doc with confirmed scope wording
+
+Tighten orphan-handling phrasing per Critic review — this module
+includes minimal orphan-accounting for unmatched_wakeup_count, not
+"orphan handling planned for later" which contradicts the actual scope.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>f336b25046cb70dcf8565b8a664b75fd3e3bb0ed
+feat: add event correlation sub-step (§3.2 correlate)
+
+Integrate correlation module that converts raw scheduling events into
+Wait-For-Graph edges via a three-event pattern (switch-out → wakeup →
+switch-in). Implements last-wake-wins policy for multi-wakeup scenarios.
+
+This is the correlate sub-step of final-design.md §3.2 only — Parse,
+Reorder, and Orphan handling are separate pipeline stages.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>96ef254681efe62e6000f2028255443f553aedd8
+Merge pull request #91 from adrian-mason/phase1/record-cli
+
+feat(cli): wperf record/report CLI scaffold with signal handling
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>2bf31799909b67e690a610b5a0e300605aa726b8
+fix: validate duration is positive, reply to Gemini comments
+
+- Add parse_positive_duration() to reject zero/negative --duration
+- Buffer-size power-of-2 validation deferred to record-time (perfarray
+  path does not require it)
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>289c29c29605609e6490fe5f158f24b65184e6f4
+fix: add version subcommand per final-design.md §1.2
+
+Adds `wperf version` as a proper subcommand (not just --version flag),
+matching the CLI model in final-design.md §1.2.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>b69dadbeac15647623ad0f44c9a0ec59c1a53974
+fix: address Critic review — signal flag inversion + no false-success
+
+1. Signal handling: `stop_requested` starts false, signal_hook stores
+   true on SIGINT/SIGTERM. Loop checks `!stop_requested` — previously
+   broken because flag started true and signal re-stored true (no-op).
+
+2. BPF path: returns NotYetWired error instead of producing misleading
+   empty .wperf trace. Skeleton build pipeline must be integrated before
+   record can produce real output.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>2652ac0da813c26827e736d6f44626b9b59b0aa8
+feat(cli): add wperf record/report CLI scaffold with signal handling
+
+CLI scaffold for wperf record subcommand (W1 #10):
+- clap derive-based CLI with record/report/version subcommands
+- Record args: -o/--output, -d/--duration, --buffer-size
+- SIGINT/SIGTERM graceful shutdown via signal-hook AtomicBool
+- BPF pipeline orchestration seam behind #[cfg(feature = "bpf")]
+- Runtime error (not compile error) when BPF feature is absent
+- Report subcommand stub with "not yet implemented" message
+
+Does NOT deliver end-to-end record pipeline — blocked on BPF
+skeleton build wiring. Current BPF path writes valid empty trace.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>6ca1297c9acdc177e731cf7fb8f2e3a6b885f44a
+Merge pull request #88 from adrian-mason/phase1/format-reader
+
+feat(format): .wperf file reader with TLV parsing and crash recovery
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>edf734315f4d80bd2964b2fd18e8d1bc49dc2ffb
+style: fix rustfmt import grouping in reader.rs
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>060d04bb669b831c7ef180aa669c5333c0211283
+fix: address Gemini review — OOM protection, named constants, early break
+
+- Add MAX_PAYLOAD_SIZE guard before metadata section allocation (OOM protection)
+- Replace magic numbers with writer constants (REC_TYPE_SCHED_EVENT, TLV_HEADER_SIZE, SECTION_ID_METADATA)
+- Break out of section table loop once metadata found
+- Make REC_TYPE_SCHED_EVENT, TLV_HEADER_SIZE, SECTION_ID_METADATA pub in writer.rs
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>a796a413a7d4c69951151499a984eefb5ec782c5
+Merge pull request #90 from adrian-mason/process/pr-template-review-checklist
+
+process: add design-conformance sections to PR template
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>f7bc960c0b40031dd116c0a0a8a7bfce55a2aa65
+fix: address Gemini review comments on PR template
+
+- Use "None" consistently (not "N/A") for Authoritative Inputs default
+- Change "Only two valid states" to "Valid entries" (PRs may list multiple deviations)
+- Clarify review checklist comment wording
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>4960f99e2304c2dfcec8fc94a194b61b8a018111
+test: add targeted tests to improve mutation kill rate to ≥90%
+
+Adds tests for Display/Error trait impls, event_type_enum accessor,
+parse_metadata boundary conditions, and TLV header edge cases to kill
+previously-surviving mutations.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>87283dcb94d75657c70c985b56d2584b9764815e
+fix(format/reader): clamp data_end to file length for crash recovery
+
+Addresses Challenger BLOCK: when header's data_section_end_offset was
+flushed but trailing records weren't fully written, reader errored with
+UnexpectedEof instead of gracefully stopping. Now clamps to
+min(bookmark, actual_file_len) in open(). Also removes dead
+InvalidSectionTableOffset variant per Critic warning.
+
+Adds regression test: stale_data_end_offset_past_eof_graceful.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>18ac872b0f836f58293b8ba9e2a295ef5907dc8e
+process: add design-conformance sections to PR template
+
+Adds Authoritative Inputs, Deviations, and Review Checklist sections
+to enforce spec-first development and prevent design drift — per Oracle
+Directives 2-3 following root cause analysis of PR #72/#87 spec drift.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>740e48a989a9faf94cfd904d956f6d41562ab313
+Merge pull request #87 from adrian-mason/phase1/bpf-sched-probes
+
+feat(bpf): sched_switch + sched_wakeup tracepoint probes
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>5ef94534cfba378e72e60f13d76adc0a6ac812ac
+fix: pin sync script to vendored upstream commits, not floating master
+
+Default fetch refs now match the "Upstream commit:" lines in vendored
+file headers. Pass --ref master to compare against latest upstream.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>38f4113994e118a2d7698ff0bf04ece91743fd00
+fix: sync script fetches from iovisor/bcc GitHub instead of local path
+
+Local clone dependency was wrong — script should be self-contained,
+fetching upstream headers directly from GitHub raw + API.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>4d45faf81108907cbafe17f61c90e94934bbfce3
+fix(bpf): handle task_struct state/__state rename for <5.14 compat
+
+Vendor get_task_state() from libbpf-tools core_fixes.bpf.h (upstream
+commit 82ad428c) which uses bpf_core_field_exists + shadow structs to
+handle the state→__state rename in kernel 5.14.
+
+Without this, BPF_CORE_READ(prev, __state) fails on 4.18-5.13 kernels
+where the field is still named "state".
+
+Also updates sync script to track both compat.bpf.h and core_fixes.bpf.h.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>0342139ef417d9611a82be4f992a337102f0a77f
+fix(scripts): resolve sync script path before cd
+
+SCRIPT_DIR must be computed before cd into BCC_REPO, otherwise
+dirname resolves relative to the wrong cwd.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>a3d375843998956367ddb7ae3d57b85aef7d64e3
+refactor(bpf): vendor compat.bpf.h from libbpf-tools
+
+Replace hand-rolled reserve_buf/submit_buf with vendored compat.bpf.h
+from bcc/libbpf-tools (upstream commit 7f394c6d), per ADR-002-supplement
+which specifies "BPF side vendors compat.bpf.h directly".
+
+Adaptations from upstream:
+- Map declarations stay in wperf.bpf.c (wperf-specific types/sizes)
+- Drop counter instrumentation added to reserve_buf (wperf extension)
+- Function signatures use upstream API (void*, __u64 size)
+
+Also adds scripts/sync-libbpf-compat.sh for provenance tracking.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>d5da1a2e9a7b2725a67193ab42c57397368e85eb
+fix(bpf): use bpf_ktime_get_ns for 4.18+ kernel compatibility
+
+bpf_ktime_get_boot_ns requires kernel 5.8+, which conflicts with our
+minimum kernel target (RHEL 8.2 / 4.18). Switch to bpf_ktime_get_ns
+(available since 4.1) to match the design baseline in ADR-004/012.
+
+Addresses Challenger BLOCK on PR #87.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>bc3eaeaf0c8bed420e2c38d8d85adab4986b5074
+Merge pull request #86 from adrian-mason/phase1/transport-abstraction
+
+feat(transport): add transport abstraction layer (W1 #8)
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>4dc5b362c3ff8d7512e01acfa5cd1e3b5c0e6c49
+Merge pull request #85 from adrian-mason/infra/pin-action-refs
+
+ci: pin action refs to commit SHAs
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>7b29177b1353805967902dfce10defac2cdd6201
+fix(bpf): encode waker identity in wakeup prev_tid/prev_pid fields
+
+Both wakeup handlers were zeroing prev_tid/prev_pid, which conflicts
+with the event contract in src/format/event.rs where prev_* fields
+encode the waker identity for sched_wakeup events.
+
+Now: prev_tid/prev_pid = waker (bpf_get_current_pid_tgid()),
+     next_tid/next_pid = wakee (task_struct p).
+
+Addresses Challenger/Critic BLOCK on PR #87.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>cd702bd302bcfc4ee75ef4ee7d964fdd9644047c
+fix(bpf): use direct field access in tp_btf handlers
+
+tp_btf provides BTF-typed task_struct pointers — pid/tgid can be
+accessed directly (prev->pid) instead of BPF_CORE_READ. Keeps
+BPF_CORE_READ only for __state which needs CO-RE relocation.
+
+Addresses Critic review warning on PR #87.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>7a6840bf6894635c8c9902f5e132ac3cc36a90b3
+feat(bpf): add sched_switch + sched_wakeup tracepoint probes
+
+Dual-variant BPF programs (tp_btf 5.5+ / raw_tp 4.17+ fallback)
+with CO-RE ringbuf/perfarray transport selection. Source-only —
+compilation requires skeleton build pipeline (Task #5).
+
+Implements W1 #7 (ADR-013).
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>053355aacc824bd71e08349c048eeb3540dc96fc
+feat(transport): add transport abstraction layer (W1 #8)
+
+Implements ADR-004 EventTransport trait with unified interface over
+ringbuf and perfarray transports. Includes TransportConfig for buffer
+sizing, and ReorderBuf min-heap for perfarray global timestamp ordering.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>ab21700e8212f90cb762534242c36fb7fa5c9527
+fix: use full 40-char SHAs for action pins
+
+GitHub Actions requires full commit SHAs, not short refs.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>c41a1dbc1cd05e6fec2c9c38a09bf9045acb6edf
+ci: pin action refs to commit SHAs + document nightly semantics
+
+Pins dtolnay/rust-toolchain to commit SHAs (master: 3c5f7ea2,
+nightly: 5b842231) to prevent silent drift. Other actions keep tag
+refs with SHA comments for auditability.
+
+Adds header comment to nightly.yml clarifying it is visibility-only
+and must not be added to branch protection required checks.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>464f839670b25e1f648fff1d809393e305ea0165
+ci: add nightly workflow (ASan/TSan + iai-callgrind regression)
+
+Adds a nightly CI workflow (04:00 UTC + manual trigger) with:
+- ASan and TSan sanitizer jobs using nightly Rust + -Zbuild-std
+- iai-callgrind benchmark regression job with valgrind
+
+Also narrows RUSTSEC-2025-0141 advisory ignore from global list to
+scoped [[advisories.ignore]] with explicit reason field.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>bdfd3297125bae153d56c66ef2444950137e2e22
+bench: add iai-callgrind instruction-count benchmarks
+
+Adds iai-callgrind benchmarks for cascade engine (chain and fan-out
+topologies at 16/64 nodes). Instruction-count benchmarks are
+deterministic and suitable for CI regression detection. Ignores
+RUSTSEC-2025-0141 (unmaintained bincode, transitive dev-dep only).
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>c856cdf5ee0dc2659cd11ff426dbe71e3aa46df4
+ci: add criterion benchmark framework (cascade engine baseline)
+
+* ci: add criterion benchmark framework for cascade engine
+
+Scaffolds benchmark infrastructure with criterion. Three graph
+topologies (chain, fan-out, dense) at varying sizes establish a
+baseline for cascade engine performance. CI compiles benchmarks
+to prevent bitrot but does not run them (noisy in CI).
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+* bench: reduce dense graph sizes to avoid exponential blowup
+
+Complete graphs cause exponential path explosion in cascade recursion
+(max_depth=10). dense/16 and dense/12 both hang; dense/8 completes
+in reasonable time. Reduce dense set to [4, 8].
+
+
+---------
+
+>>>19ead3a2be0b8eec36d61ac24c964c0f4137680a
+ci: add coverage job (cargo-llvm-cov)
+
+* ci: add coverage job with cargo-llvm-cov
+
+Adds a non-blocking coverage job that runs cargo-llvm-cov with
+--all-features, uploads lcov.info as artifact, and prints a text
+summary. Coverage is visibility-only, not a merge gate.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+* ci: fix coverage job — drop --all-features, use report subcommand
+
+--all-features enables bpf feature which conflicts with stub tests
+that assert default-feature behavior. Coverage runs default features
+only (same as cargo test). Summary uses report subcommand to avoid
+re-running the full test suite.
+
+
+---------
+
+>>>b463cee25e455c8fc36f4b662e721f21f03bb2b4
+ci: add supply-chain job (cargo-deny + cargo-audit)
+
+Closes C1 (#p1-infra task #1). Adds deny.toml with license allow-list
+covering all current deps (including BSD-2-Clause for libbpf), strict
+source policy, and advisory checks. The new supply-chain CI job runs
+cargo-deny (via EmbarkStudios action) and cargo-audit in parallel with
+existing check/mutants jobs.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>e4dd261b3e2f2c256e75bbc1c93d77cfeab51dd8
+Merge pull request #79 from adrian-mason/fix/tracefs-path
+
+fix(probe): use tracefs path for available_filter_functions
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>96f84c878a60a4b9d543bd8826aad59036d87201
+fix(probe): use tracefs path for available_filter_functions
+
+Change default path from /sys/kernel/debug/tracing/ to /sys/kernel/tracing/
+for consistency with tracing_events and to avoid debugfs mount dependency.
+Adopted from Gemini code review on PR #77.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>5543a0eb8b7cf4715e45c1e2e2431f588249c3c8
+infra: lessons registry, CI bpf validation, PR review checklist
+
+infra: lessons registry, CI bpf validation, PR review checklist
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>42c27e7d28fd889b5567c3e44ecbb105b67b18d4
+infra: lessons registry, CI bpf validation, PR review checklist
+
+Establishes a phase carry-forward mechanism to prevent Gate 0 validated
+baselines from silently drifting in subsequent phases (root cause of the
+libbpf-rs 0.24 vs 0.26.1 incident in PR #77).
+
+- docs/lessons/REGISTRY.md: cumulative lessons index with Phase 1
+  toolchain baseline and carry-forward rules
+- L-001 through L-004: promoted Gate 0 and Phase 1 W1 lessons
+  (dep baseline, API patterns, feature-on CI, review checklist)
+- CI: adds cargo check/clippy with --features bpf + libelf-dev/zlib deps
+- PR template: adds dependency baseline checklist
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>a209039f67bd04621bd63d7e94917c167a75435b
+feat(probe): dynamic feature probing module (W1 #6)
+
+feat(probe): dynamic feature probing module (W1 #6)
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>1b647d97838352d6eb480bed23df343079d5f771
+fix(probe): move mutation exclusions to .cargo/mutants.toml
+
+Replace #[mutants::skip] source annotations with .cargo/mutants.toml
+exclude_re config. The source annotations broke cargo check --features bpf
+(unresolved crate `mutants`). The config-file approach excludes the same
+cfg-gated BPF probe functions without polluting the normal compile path.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>296f64dd7d4a672cb9bd441b341c8555eaa13319
+fix(probe): resolve mutation testing false negatives for cfg-gated BPF code
+
+- Add #[mutants::skip] to 4 #[cfg(feature = "bpf")] functions whose bodies
+  are compiled out in default build, making mutations unobservable to tests
+- Fix file_contains_line permission test: use chmod 000 instead of opening a
+  directory (Linux File::open succeeds on directories)
+
+Kill rate: 225/247 = 91% (was 223/252 = 88%)
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>6c96b5132cc41359dcf1dac8a04bb2ba7df31f14
+test(probe): add tests to improve mutation testing kill rate
+
+Add 8 new tests targeting missed mutants: Error::source chain,
+file_contains_line permission-denied propagation, stub return value
+discrimination, and probe_all cgroupv2-absent path. 25 probe tests total.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>6da57f7daf824d9674bca267549332367ccfe297
+fix(probe): upgrade libbpf-rs to 0.26.1 per Gate 0 validated version
+
+Gate 0 signoff and ebpf-prototype docs explicitly validated with
+libbpf-rs 0.26.1. Pin to that version instead of 0.24 to match the
+documented and tested API surface.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>967084ceb0a4a03ab1c42aa6525600017bdd1d21
+fix(probe): correct libbpf-rs API usage and add probe error diagnostics
+
+MapHandle::create() is the correct API in libbpf-rs 0.24 (not MapBuilder).
+Set bpf_map_create_opts.sz per libbpf convention. Use try_from for page_size
+cast to satisfy cast_possible_truncation pedantic lint. Add eprintln diagnostics
+in probe_all() so unexpected probe failures are visible, not silently swallowed.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>b4870a98ef69311fab93cd59ba56f0e6c92cd881
+feat(probe): dynamic feature probing module (W1 #6)
+
+Implement ADR-002 per-feature probing matrix with three-tier architecture:
+Tier 1 (fs checks) for BTF/cgroupv2/tracepoint/kprobe, Tier 2 (syscall)
+for ringbuf/bpf_loop behind cfg(feature="bpf"), Tier 3 (attach-based)
+stubs for tp_btf/fentry pending skeleton infra. ProbePaths injection
+enables unit testing without real sysfs. 17 new tests, all green.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>59895b8027a01d69f9cec6f0c178ee2684e92de1
+Merge pull request #72 from adrian-mason/phase1/wperf-format-write
+
+feat(format): wPRF v1 binary format writer (Phase 1 W1 #9)
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>8b7eae9bc581405ce4c926ae8882f82d14b70242
+fix(format): resolve pedantic clippy lints for PR #72
+
+Adds cast_possible_truncation allows for known-safe casts (EVENT_SIZE→u32,
+metadata key/value lengths→u16), applies doc_markdown backticks, and uses
+is_multiple_of() for crash recovery interval check.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>d0b4e2ec8c5e33e23224da1723ffa31b98dae405
+style(format): apply rustfmt to writer.rs
+
+CI rustfmt caught formatting drift in method chains and line wrapping.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>27068be730b8e99d14645a12bd5a79d73e883f8d
+fix(format): Ord/Eq consistency and crash-recovery initial offset
+
+Derive PartialOrd+Ord on WperfEvent instead of manual timestamp-only
+Ord, which violated Rust's total order contract (cmp==Equal but a!=b).
+Initialize data_section_end_offset to HEADER_SIZE so crash recovery
+readers see valid bounds even if <1024 events were written.
+
+Addresses Gemini review comments #1 and #4 on PR #72.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>db4cb4fa93f9dee9f8eae0747c14cd987965c30d
+fix(format): move metadata to footer section, stop abusing feature_bitmap
+
+event_count and drop_count now live in a proper Footer Section Table
+(Section ID 3 = Metadata) per ADR-010 §4.3, instead of being stuffed
+into feature_bitmap bytes 8..24. section_table_offset in the header
+now points to the footer. feature_bitmap is reserved for capability
+flags only.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>8034cf3aa11f0a2f29b957997523774c89685bab
+feat(format): wPRF v1 binary format writer (Phase 1 W1 #9)
+
+Implement the .wperf binary file format per ADR-010 and final-design §4:
+64B header with crash recovery offset, 5B TLV record wrapping, and 40B
+naturally-aligned event struct matching BPF-side layout. The flags field
+(offset 36, 4B) replaces tail padding for Phase 2+ extensibility.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>42ad39b80f0a87a52a1354e51b57321a950e56c1
+Merge pull request #76 from adrian-mason/fix/ci-toolchain-ref
+
+fix(ci): correct dtolnay/rust-toolchain action ref
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>f7692b86f53b4f916370bb8dc792db8f1e3d5213
+fix(ci): add components to rust-toolchain.toml
+
+The root cause of CI `cargo-fmt not installed` is that rust-toolchain.toml
+declares channel = "1.94" without components, so rustup provisions the
+toolchain without clippy/rustfmt. The dtolnay/rust-toolchain action installs
+"1.94.0" (distinct toolchain name) with components, but cargo respects the
+toml and uses "1.94" which lacks them.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>6029c2905e75621c14cef5e3cb295f774723ff8b
+fix(ci): use dtolnay/rust-toolchain@master with toolchain: 1.94.0
+
+The @1.94 ref doesn't exist as a tag/branch on dtolnay/rust-toolchain,
+causing components (rustfmt, clippy) to not install properly. The correct
+usage is @master with toolchain specified in the with block.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>053f469461ee0d599f4bd025672741ad718730a0
+Merge pull request #75 from adrian-mason/infra/ci-toolchain-pedantic
+
+infra(ci): pin toolchain to 1.94 and enable clippy pedantic
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>83aa111da0cfadb71bebcc512826c65c468c8142
+perf(scc): use outgoing_edges instead of all_edges in has_self_loop
+
+all_edges() builds and sorts a vector of every edge in the graph
+(O(E log E)), but we only need to check one node's outgoing edges.
+Switch to outgoing_edges(idx) which is O(degree).
+
+Addresses Gemini review comment on PR #75.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>f2805746797b19dfbd9fc910211a03e7e37e51f7
+fix(ci): address Challenger review — all-targets, action pin, test lint fixes
+
+- CI clippy now uses --all-targets to lint test code too
+- Action ref changed from @master to @1.94 (version-pinned, no drift)
+- Fix pedantic lint errors in test files: cast_possible_wrap via
+  try_from, cast_sign_loss via unsigned_abs, format string inlining,
+  doc_markdown backticks, or_patterns range rewrite
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>da475bb914062bbb054356150a88d754dd2cb44c
+infra(ci): pin toolchain to 1.94 and enable clippy pedantic
+
+Root cause of CI fmt drift: workflow used dtolnay/rust-toolchain@stable
+(latest stable) instead of the repo's rust-toolchain.toml pin (1.94).
+Different rustfmt versions produce different output.
+
+Changes:
+- Pin both CI jobs to toolchain 1.94 via dtolnay/rust-toolchain@master
+- Enable clippy::pedantic via [lints.clippy] in Cargo.toml
+- Allow-list low-signal lints: module_name_repetitions, must_use_candidate,
+  return_self_not_must_use, missing_errors_doc, missing_panics_doc
+- Fix all pedantic warnings: doc_markdown backticks, wildcard_imports,
+  manual_let_else, trivially_copy_pass_by_ref, used_underscore_binding,
+  match_wild_err_arm
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>d820b44a88b4a7f31fa4fbec6248aa5ca14a7a65
+Merge pull request #74 from adrian-mason/docs/phase1-design-sync
+
+docs: sync Phase 1 design decisions
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>b92d6e7d2e6085180b19fd352eec5362fd6608d2
+docs: fix Rocky version (8.4+, not 8.2+) and clarify CI target vs support floor
+
+Rocky Linux first release was 8.4; "Rocky 8.2+" is invalid. Distinguish:
+- Support floor: RHEL 8.2+ / Rocky 8.4+ (BTF available)
+- CI target: Rocky 8.9 (kernel 4.18.0-513+)
+
+Addresses Gemini review comments on PR #74.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>3b88d97c8e4fd1c19ce21790e9c5242287a76f5f
+docs: restructure ADR-003 with Phase 1 decision as current contract
+
+Move original 2026-03-17 rationale into collapsed details block,
+make Phase 1 BTF-required decision the present-tense authoritative
+text. Addresses Challenger's BLOCK on cross-doc inconsistency.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>2cf98b8f31d07c1530bd7943fe85d1fc49f57e48
+docs: fix cross-doc minimum kernel version inconsistency
+
+Align §1.4, ADR summary table, and ADR-003 with Phase 1 BTF-required
+decision. Previously these still said "5.4 recommended, 4.18 best-effort"
+while §1.3/§8.3 already said "Rocky 8.9 minimum, BTF required".
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>cdb57687df0f70325268505c365ddc3eb295dc8e
+docs: sync Phase 1 design decisions from #p1-dev discussion
+
+Align authoritative docs with decisions made in #p1-dev:65c931fc:
+- BTF hard requirement for Phase 1 (minimum Rocky 8.9 / RHEL 8.2+)
+- Section ID 3 metadata phased delivery (writer: EVENT_COUNT/DROP_COUNT,
+  record CLI: BUILD_ID/HOSTNAME/OSRELEASE/CLI_ARGS)
+- Feature bitmap bit 0 = HAS_TIMESTAMPS assignment table
+- tp_btf direct access vs raw_tp BPF_CORE_READ dual handler strategy
+- enum BpfBuffer transport abstraction (not trait object)
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>b10f98f8476af13930ea288e91ae2787a70d48bf
+Merge pull request #73 from adrian-mason/docs/format-spec-amendment-40b
+
+docs: amend format spec — 23B BaseEvent → 40B wperf_event
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>ffd2b399d074d2e9be9380243caed41bb6fd2712
+docs: fix ADR-010 throughput math (45B on-disk) and gate0 historical framing
+
+Address review feedback:
+- ADR-010 capacity planning now uses 45B/event (5B TLV + 40B payload)
+  for on-disk throughput: 4.5 MB/s raw, 560-900 KB/s compressed
+- Gate 0 wprf-prototype.md line 78 reframed as historical validation,
+  no longer claims 23B "matches the design spec"
+- Re-apply terminology updates reverted by linter
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>3c1758da1a1dce34ab88e55fe758597c232c0103
+docs: amend format spec — 23B BaseEvent → 40B wperf_event
+
+The BPF verifier on kernels <5.8 rejects packed structs due to
+per-byte load instructions; naturally-aligned 40B wperf_event is a
+Phase 1 host-kernel compatibility constraint, not an implementation
+preference. Update §2.4, §4.2, ADR-010 overhead/capacity numbers,
+ADR-004-supplement/ADR-014 terminology, and annotate Gate 0 prototype
+doc as historical.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>810e9f98dcfed5846e6fd3b08f907b4a8e0b72a4
+docs: Phase 1 verification plan (#71)
+
+* docs: add Phase 1 verification plan to final-design.md
+
+Team-consensus verification additions for Phase 1: snapshot/golden tests
+(insta), fixture-driven integration tests, Miri on unsafe/FFI boundaries,
+sanitizers (nightly), cargo-deny/audit, cargo-llvm-cov (visibility only),
+benchmark framework (criterion). Loom conditional on transport architecture.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+* fix: address Challenger review — cargo-deny out of gate, split Miri/sanitizers timeline
+
+1. Move cargo-deny/audit from must-pass gate to non-blocking CI hygiene
+   (infrastructure ≠ product exit criteria)
+2. Split Miri and sanitizers in timeline — sanitizers marked as
+   "nightly, infra-dependent, may converge later than Miri"
+
+
+* fix: move non-blocking items out of Must-Pass Criteria cell
+
+Non-blocking, hygiene, and conditional items now live in a separate
+"Phase 1 verification notes" block below the gate table — the
+Must-Pass Criteria cell only contains true product exit criteria.
+
+
+* fix: move verification notes after gate table to preserve markdown structure
+
+Notes block was splitting the gate table between Phase 1 and Phase 2a
+rows, breaking markdown table rendering. Moved to after Phase 3.
+
+
+* fix: adopt Gemini comments — replace P1-05/P1-06, clarify benchmark wording
+
+- Comment 2: replace P1-05/P1-06 with "Phase 1 W1-W2 (BPF probes +
+  transport)" for self-containment with §7.2 timeline
+- Comment 3: clarify "benchmark framework automation (criterion, per-PR
+  CI gating deferred)" to distinguish from overhead <3% CPU must-pass gate
+
+
+---------
+
+>>>86fd2605868baa30e5b64b53a30e0bc81412c857
+docs: add fuzz testing to Phase 1 roadmap (#70)
+
+* docs: add fuzz testing to Phase 1 roadmap as verification enhancement
+
+Add L6 (Fuzz Testing) to verification strategy table, note fuzz
+targets in Phase 1 timeline, and mark as non-blocking enhancement
+in gate criteria. Implementation deferred until parser/transport
+APIs stabilize; gate promotion deferred until cost/signal evaluated.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+* docs: demote fuzz from L6 to enhancement note outside five-layer pyramid
+
+Per team review: fuzz is a non-blocking Phase 1 enhancement, not yet
+a formal verification layer. Keep the five-layer pyramid (ADR-007)
+intact and describe fuzz as a separate enhancement paragraph below
+the L1-L5 table.
+
+
+---------
+
+>>>97d4aa8a79a6074b511ae575bfa0e26cf19f5f30
+test: mutation kill rate ≥90% (Phase 0 gate 3/3) (#69)
+
+* test: add targeted tests to achieve ≥90% mutation kill rate
+
+Adds unit tests for HARDIRQ/SOFTIRQ thread display, WFG acyclicity
+checks, total_attributed pre-cascade, and condensation all_super_nodes
+coverage. Raises cargo-mutants kill rate from 89.9% (124/138) to
+94.2% (130/138), clearing the Phase 0 gate threshold.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+* test: kill 2 more mutants, add cargo-mutants CI job
+
+- Add scc_of negative test (catches scc_of → Some(Default) mutant)
+- Add DP arithmetic test on handcrafted DAG (catches + → * mutant)
+- Add mutation testing CI job with ≥90% gate, uploads report artifact
+- Kill rate: 95.7% (132/138)
+
+
+* fix(ci): let cargo-mutants exit nonzero without blocking threshold gate
+
+cargo-mutants exits 2 when any mutants are missed, which short-circuits
+the explicit ≥90% kill rate verification step. Add continue-on-error so
+the threshold step is the actual pass/fail gate.
+
+
+* test: assert total_attributed == total_raw_wait before cascade
+
+Adopt Gemini suggestion: assert the relationship directly alongside
+the hardcoded value, making the pre-cascade identity invariant explicit.
+
+
+---------
+
+>>>49b764c904f1fdd71de2406c4f8d481129cd6638
+refactor(cascade): rename is_conserved → invariants_ok (ADR-016) (#68)
+
+* refactor(cascade): rename is_conserved → invariants_ok, align with ADR-016
+
+One-shot breaking rename per ADR-016 migration strategy (pre-1.0, no alias):
+
+- is_conserved() → invariants_ok(original, result): now checks I-2 ∧ I-7
+  (was I-2 only). Restores I-7 locality check in production sentinel.
+- verify_conservation() → verify_engine_postconditions()
+- ConservationError → InvariantError
+- GraphMetrics.is_conserved → GraphMetrics.invariants_ok
+- JSON field: "is_conserved" → "invariants_ok"
+- All test references updated
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+* fix(cascade): update stale I-1/ADR-015 references in engine and tests
+
+Challenger PR #68 review: compute_cascade doc comment still referenced
+retired I-1/ADR-015, property_tests header said "7 invariants", and
+cascade_oracle.py referenced "I-1/I-2 invariant assertions".
+
+
+* fix(cascade): clarify invariants module doc per Gemini review
+
+invariants_ok and verify_engine_postconditions are independent functions,
+not a caller/callee relationship. Clarify their roles in the module doc.
+
+
+* style: cargo fmt on figure4 test assert
+
+
+---------
+
+>>>cf41f013f3675934de3419622e119ecb16fed599
+docs(adr): retire I-1, narrow I-6 (ADR-016) (#67)
+
+* docs(adr): retire I-1 conservation invariant, narrow I-6 (ADR-016)
+
+ADR-015's per-entry-edge subtree-sum conservation was proven incorrect
+for fan-out graphs (BUG-3 counterexample: 140 ≠ 100). Per-edge
+independent cascade has no cross-edge conservation invariant.
+
+ADR-016 retires I-1, narrows I-6 to simple chains, renames
+is_conserved → invariants_ok (I-2 ∧ I-7 structural guard), and
+honestly documents that the sentinel catches 0/5 known bugs.
+
+Amends: ADR-007, ADR-012, final-design.md
+Supersedes: ADR-015 §35-60
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+* fix(docs): sync cross-doc invariant enforcement and count references
+
+Critic PR #67 review: ADR-007 Layer 1 and final-design.md §3.4 still
+described all 6 invariants as "enforced after every run / debug_assert"
+but the coverage matrix specifies different enforcement per invariant.
+ADR-012 had "all 7 invariants" residual text.
+
+
+* fix(docs): sweep remaining I-1/is_conserved residuals in ADR-007 and final-design
+
+Challenger PR #67 review round 2: ADR-007 Option C pros/cons still
+referenced "I-1 catches 4/5 bugs" and "I-1 through I-7". final-design
+§6.1 L1 row, §6.2, §6.4, §7.1 prototype B, §7.2 timeline, and §8
+comparison table still had pre-ADR-016 language.
+
+
+---------
+
+>>>331bbb1917ace089e659c441e763f95a58ec56dc
+refactor(cascade): is_conserved checks I-1 only, cascade_engine returns Result (#66)
+
+is_conserved now checks per-entry-edge non-amplification only (ADR-015 I-1).
+cascade_engine returns Result<WaitForGraph, ConservationError> — never panics
+in release builds. verify_conservation replaces assert_weight_conserved as
+the internal engine sentinel checking I-2 + I-7.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>03158ac6ceb4fcc24371fe0d2a6cde6bd3cd1f6f
+fix(cascade): correct compute_cascade recursive return values (ADR-007) (#65)
+
+compute_cascade now returns (propagated, self_blame) tuple per ADR-007
+pseudocode. child_absorbed uses prop_down + child_blame instead of
+interval.duration(), fixing incorrect weight attribution. Python oracle
+synchronized. I-6 depth monotonicity narrowed to simple chains only.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>bef88f38469c495084498562983dcfb9576650a9
+docs(cascade): amend I-1 conservation invariant to per-entry-edge (ADR-015) (#64)
+
+The original I-1 defined Σ(attributed_delay) == Σ(raw_wait) globally,
+which is mathematically incompatible with per-edge independent cascade.
+Figure 4 proof: Σ raw=180ms ≠ Σ attributed=100ms. This was a
+project-specific formalization error — the OSDI'18 paper does not define
+any conservation invariant (p.8, lines 640-648: overlapping wait segments
+are "counted multiple times").
+
+ADR-015 redefines I-1 as per-entry-edge conservation: for each entry
+edge, its cascade subtree attributed sum equals the entry edge's
+raw_wait. This is the strongest correct conservation property.
+
+Also fixes stale bottleneck.py oracle references (bottleneck.py does
+not implement cascade redistribution per Gate 0 finding), aligns
+invariant count to 7 (I-1..I-7), and unifies sentinel naming to
+assert_entry_edge_conserved().
+
+Closes #63
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>ffa5bb57e68dc8517dbe87dafc4c3e925b6d8693
+fix: Gate 0 doc corrections — oracle scope, throughput, TLV claim
+
+- Restore cascade oracle as tests/fixtures/cascade_oracle.py with
+  explicit scope: non-overlapping topologies only (no sweep-line
+  partition, BUG-3 not covered)
+- Fix throughput: "3.3M events/sec" → "3.3M events in 3s (~1.1M/sec)"
+- Fix TLV forward-compatibility: "tested" → "design-level support,
+  skip logic deferred to Phase 1"
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>3ed80488723c38ba8442f8a74f99bf5872c6a304
+fix: address PR #59 review feedback — code quality improvements
+
+
+* fix: address PR #59 review feedback — 4 code quality improvements
+
+1. types.rs: extract pseudo-thread magic numbers to named constants
+   (NIC_TID, DISK_TID, HARDIRQ_TID, SOFTIRQ_TID)
+2. engine.rs: rename _prop_down to _ (idiomatic unused binding),
+   clarify NEW-BUG-1 fix comment
+3. tarjan.rs: optimize internal_edges() to iterate SCC members'
+   outgoing edges instead of full-graph all_edges() scan
+4. cascade_oracle.py: pre-process edges into incoming/outgoing dicts
+   for O(1) lookup instead of O(E) linear scan per call
+
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+* fix: CI rustfmt install + internal_edges expect invariant
+
+- CI: add fix/* to push trigger, add rustup component fallback for
+  runners where dtolnay/rust-toolchain doesn't install rustfmt
+- tarjan.rs: if let → expect() for SCC member lookup — members must
+  exist in the graph by construction (PR #60 review feedback)
+
+
+
+* fix: internal_edges use binary_search instead of BTreeSet
+
+scc.members is already sorted — binary_search on the Vec gives
+O(log N) lookup without BTreeSet allocation overhead.
+
+
+
+* fix: align match arm order with constant declarations
+
+
+
+---------
+
+>>>441dc8f86ab089176a245b5069e1367d8b0961a4
+add: Phase 0 Cascade Algorithm Correctness — 12 issues, 90 tests
+
+Resolves #10, #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21, #52
+
+
+* add: #10 Cascade Engine core — types, WFG, sweep, engine
+
+Phase 0 foundation: pure-Rust algorithm library, no BPF dependencies.
+
+Modules created:
+- graph/types.rs: ThreadId (pure tid), TimeWindow (u64 ms),
+  EdgeWeight, NodeKind, ElementaryInterval
+- graph/wfg.rs: WaitForGraph (petgraph DiGraph wrapper, BTreeMap
+  node lookup for deterministic iteration)
+- graph/sweep.rs: sweep_line_partition — decomposes overlapping
+  outgoing edges into elementary intervals (BUG-3 fix)
+- cascade/engine.rs: cascade_engine + compute_cascade (recursive
+  DFS with depth limit, cycle detection via BTreeSet path)
+- cascade/invariants.rs: I-1..I-7 check functions
+- output.rs: CascadeResult with is_conserved sentinel
+
+Key design decisions:
+- u64 ms for exact integer arithmetic (no float drift)
+- Immutable cascade: returns new graph, no mutation during traversal
+- BTreeMap/BTreeSet throughout for deterministic behavior (ADR-007)
+
+Tests (22 passing):
+- Figure 4: User→Parser=20, Parser→Network=80 (exact match)
+- Extended 3-node: Parser=20, Network=30, Disk=50
+- Sweep-line: 0/1/2/3 overlapping edges, coverage verification
+- TimeWindow: overlap, duration, contains, edge cases
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+* add: #11 I-1 weight conservation — production sentinel wired into engine
+
+assert_weight_conserved() checks I-2 (non-amplification) + I-7 (locality)
+after every cascade run. Panics in debug, logs in release. Fixes output.rs
+is_conserved to use canonical check instead of wrong global-sum equality.
+
+
+
+* add: #12 invariants I-2..I-7 — debug_assert wiring + violation tests
+
+- I-4 (termination) check_termination() added — verifies topology preserved
+- I-6 (depth monotonicity) fixed — corrected from wrong global-sum equality
+  to proper deep.total_attributed ≤ shallow.total_attributed
+- I-3, I-4 wired as debug_assert in cascade_engine
+- I-5, I-6 remain test-only (call cascade_engine internally, too expensive)
+- 8 new tests: violation detection for I-2, I-4, I-7; passing tests for
+  I-3, I-4, I-5, I-6, I-7 (window change)
+
+
+
+* add: #13 Figure 4 integration tests — paper scenario + extended chains
+
+7 integration tests: exact Figure 4 values (20ms/80ms), root edge
+conservation (chain sums to 100ms), JSON output, extended 3-node chain
+(20/30/50), single-edge leaf, disconnected components. All invariants
+verified.
+
+
+
+* add: #14 bug regression tests — 5 known bugs verified fixed
+
+BUG-1: visited_path scope (diamond graph, E reachable via C and D)
+BUG-2: propagated_down ignored (chain, intermediate node attribution)
+BUG-3: multi-edge overlap double-counting (sweep-line prevents)
+BUG-4: combined BUG-2+BUG-3 (chain with overlapping children)
+NEW-BUG-1: leaf node zero blame (leaf gets full attribution)
+
+
+
+* add: #15 Tarjan SCC + condensation DAG
+
+find_sccs() wraps petgraph tarjan_scc, returns sorted ThreadId members.
+build_condensation() creates acyclic DAG: each SCC → super-node, cross-SCC
+edges deduplicated with max weight. CondensationDag provides scc_of(),
+sinks(), out_degree(). internal_edges() helper for heuristic.
+8 unit tests: singleton/cycle/mixed SCCs, condensation topology, sinks.
+
+
+
+* add: #16 Knot detection — sink SCC filtering with business rules
+
+detect_knots() filters condensation sinks by 3 rules: exclude trivial
+singletons (no self-loop), exclude pure kernel-thread SCCs, keep sinks
+with at least 1 userspace thread. 6 tests: trivial/self-loop/cycle
+sinks, pure-kernel/mixed exclusion, non-sink cycle.
+
+
+
+* add: #17 MAX heuristic — super-node weight computation
+
+max_heuristic_weight() returns MAX(attributed_delay) of internal edges
+for multi-node SCCs, or MAX of incident edges for singletons.
+apply_max_heuristic() fills weights on all super-nodes in the DAG.
+5 tests: singleton/cycle weights, figure4, isolated node, apply fn.
+
+
+
+* add: #18 Critical path DP — longest path on condensation DAG
+
+critical_path_dp() uses topological sort + O(V+E) DP to find the
+maximum-weight path through the condensation DAG. Returns ordered
+chain of super-nodes with total weight. 6 tests: empty/single-node,
+figure4 path, branching picks heavier, 100-node chain.
+
+
+
+* add: #19 proptest 10K graphs — all 7 invariants verified
+
+4 proptest suites × 10K cases = 40K random graphs tested:
+- all_invariants_hold: I-1/I-2/I-3/I-4/I-7 on every graph
+- idempotency_holds: I-5 (cascade twice = same result)
+- depth_monotonicity_holds: I-6 (deeper cascade ≤ shallower)
+- condensation_is_acyclic: DAG toposort succeeds
+Random graph generator: 2-20 nodes, sparse edges, mixed node kinds.
+
+
+
+* add: #20 differential testing — Rust vs Python oracle agreement
+
+Independent Python cascade implementation (scripts/cascade_oracle.py)
+verified against Rust on 6 scenarios: figure4, extended chain, single
+edge, overlapping edges, diamond, concurrent waiters. All agree within
+1.0ms tolerance (exact match in practice — both use integer arithmetic).
+
+
+
+* add: #21 mutation testing — 91.7% kill rate (66/72 caught)
+
+Added 10 targeted tests to kill surviving mutants: concurrent_waiters
+division, depth_limit effect, is_conserved false-path, total_attributed
+validation, node_indices count, invariant violation paths.
+
+6 survivors are benign: assertion return values (side-effect panics
+make return unused), invariant checks that always pass on correct code
+(no constructible counterexample). All above 90% target.
+
+
+
+* add: #52 CI workflow + cargo fmt
+
+GitHub Actions CI: check, clippy, test, fmt, proptest, differential.
+Runs on push/PR to main and phase* branches. Applied cargo fmt to
+all source files.
+
+
+
+* fix: gitignore mutants.out artifacts
+
+
+
+---------
+
+>>>6b78ce91905c3610b9d8b2bfe89573471709fb54
+add: Gate 0 prototype validation — all 4 issues pass
+
+Gate 0 validates 3 high-risk assumptions before production code.
+
+Deliverables (docs/gate0/ only — prototype code archived at tag archived/gate0-prototypes):
+- origin-analysis.md: 12-section forensic analysis of wPerf-origin
+- cascade-understanding.md: Figure 4 validation (Parser=20ms, Network=80ms)
+- ebpf-prototype.md: 580/580 TID match, buffer stress test (7.4% drop at default perfbuf)
+- wprf-prototype.md: 10-event roundtrip + truncation recovery
+- gate0-signoff.md: all pass, Phase 0 may begin
+
+Key discoveries: no cascade reference exists; default perfbuf drops 7.4% under load;
+ringbuf 16MB + 100ms poll recommended; libbpf-rs 0.26.1 validated.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+>>>596c0bcc1b8dd502d645790e9f8c86dfd4d325bb
+update: sync appendix with session changes
+
+- Appendix A: add ADR-013, ADR-014, ADR-002-supplement,
+  ADR-004-supplement to decision record index
+- Appendix B: I-7 status "Proposed" → "Adopted"; risk count 7 → 8
+- Appendix D: new External References section (OSDI'18 paper,
+  Nakryiko blog, bcc/libbpf-tools, Elastic eBPF Profiler)
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>4ca578fe3ec35cf51a6b5985d70a3f45e021e502
+fix: update risk register (§8) — 4 corrections
+
+- §8.1: remove stale "draft status" claim — verification strategy
+  (§6) is now codified with 7 subsections
+- §8.3: expose 4.18 BTF absence as fatal blocker per
+  ADR-002-supplement — "best-effort" requires embedded BTF decision
+- §8.8: new Risk 8 — Clock Skew & Timestamp Non-monotonicity
+  (ADR-012 lists NTP as a core coverage-breaking condition)
+- §8.9: sync P2 items — wPerf-origin review as mandatory pre-Phase 0
+  prerequisite; Attr Section status updated to reflect §4.3 ID
+  reservation
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>cb5255ae76e0261426a95c004f391e3deffe8b20
+fix: correct implementation plan (§7) — 3 boundary violations
+
+- §7.2 Phase 0 W3: remove "state machine" (violates ADR-011 Phase 0
+  pure-Rust isolation; state machine belongs in Phase 1 W2)
+- §7.2 Phase 3 W1-2: add Elastic Stack Delta porting (ADR-005
+  deferred deep unwinding to Phase 3 but timeline omitted it)
+- §7.3 Phase 1 gate: add "all 5 coverage metrics exported in JSON"
+  to exit criteria (ADR-012 coverage metrics must be verified early)
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>7cc620cdeebc2e7e24483195d330ab50c31dad99
+fix: tighten verification strategy (§6) — 4 corrections
+
+- §6.2: remove "proposed" from I-7 (locality) — already adopted as
+  a mandatory invariant in §3.4's seven-invariant table
+- §6.4: add ADR-011 Phase 0 isolation constraint — differential
+  testing uses synthetic graphs only, no BPF dependencies
+- §6.6: add 4.18 to cross-kernel test matrix — required to validate
+  perfarray/raw_tp/pragma-unroll degradation paths (ADR-002/004/013)
+- §6.7: new Performance Overhead Benchmarking section defining how
+  <3% (Phase 1) and <5% (Phase 3) CPU gates are measured
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>1e4edd10e7ad99e7f9a2539c488867c1bbb5a1cb
+add: frontend constraints — self-loops, MAX label, health dashboard (§5)
+
+- §5.3: add self-loop rendering requirement per ADR-006 (Dagre cannot
+  handle A→A edges; frontend must use custom Bézier loop-back arrows)
+- §5.3: add MAX heuristic label constraint per ADR-008 (Knot weight
+  must be labeled "Max Internal Wait", never "Total Delay")
+- §5.5: new Coverage & Health Dashboard section per ADR-012/ADR-007
+  (is_conserved sentinel + 5 coverage metrics in HTML report)
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>0a053fc23f31a163845daeec956a4dd77db7835e
+fix: correct §4 data format — reserved field, metadata, attr section
+
+- §4.1: rename meta_flags to _reserved (ADR-010 replaced it with
+  256-bit feature_bitmap; retaining old name caused semantic confusion)
+- §4.3: add DROP_COUNT to Section ID 3 metadata (only collection-time
+  metric not derivable from event stream — dropped events are absent
+  from .wperf file by definition)
+- §4.3: reserve Section ID 4 for Attr Section (collection config,
+  deferred to P2 per ADR-010 but ID must be reserved now)
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>331c04667a295826dc4cbf410f99a8efc7043687
+add: coverage metrics instrumentation and softirq attribution (§2-3)
+
+Wire ADR-012's 5 coverage metrics into the pipeline stages where
+they originate:
+- §2.3: partial_stack_count on stack unwinding failure
+- §2.5: false_wakeup_filtered_count on spurious wakeup pruning
+- §3.2: unmatched_wakeup_count on orphan wakeup events
+- §3.4: cascade_depth_truncation_count on depth-10 truncation
+- §3.8: full 5-metric table replacing single drop_counter mention
+
+Also:
+- §3.3: add softirq context-based wakeup attribution mechanism
+  per ADR-009 (BLOCK_SOFTIRQ → Disk pseudo-thread)
+- §3.4: clarify I-1 is the only invariant validated in release
+  mode (exported as is_conserved), I-2–I-7 are debug_assert only
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>df7626ca72ea461ea13c56b8b8edc6adacec99bd
+fix: correct 3 errors in eBPF probe layer (§2)
+
+- §2.3: BPF_F_FAST_STACK_CMP → BPF_F_USER_STACK to align with
+  ADR-005 (fast path captures user stacks, not kernel stacks);
+  overhead corrected to ~100ns per ADR-005
+- §2.5 + glossary: spurious wakeup threshold 100μs → 50μs to align
+  with ADR-002, ADR-004, and ADR-012 analysis baseline
+- §2.2: add Drop Detection subsection documenting ringbuf/perfarray
+  loss tracking per ADR-012 coverage metrics requirement
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>8f9e56e4366dfa2bfb5cf7697705da5905da9e03
+update: expand § 1.5 glossary with 4 missing architectural terms
+
+Add WFG, Condensation DAG, Super-node, and Spurious Wakeup to the
+glossary — all used in §3.5-3.6 but previously undefined. Refine
+existing definitions: Knot now reflects §3.5 business filtering
+(sink SCC with ≥1 user thread), Pseudo-thread clarified as
+non-schedulable subsystem.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>36f31933190971c93473b62ca8647d5c52245cff
+add: eBPF probe layer analysis — 4 ADRs and design corrections
+
+Empirical analysis of libbpf-tools source code and Nakryiko best
+practices, producing 4 new decision records and correcting 3 sections
+of final-design.md:
+
+- ADR-002-supplement: libbpf-tools alignment (compat.bpf.h, non-BTF
+  fallback correction, cgroupv2 filtering pattern)
+- ADR-004-supplement: user-space transport handling details
+- ADR-013: scheduler probes use tp_btf + raw_tp fallback (not tp/)
+- ADR-014: Nakryiko best practices audit — 5 enhancement opportunities
+
+Key corrections to final-design.md:
+- § 1.3: BTF fallback is embedded BTF then EOPNOTSUPP, not hardcoded
+  offsets; ringbuf degradation path fixed; tp_btf probe row added;
+  cgroupv2 --cgroup error-out behavior documented
+- § 2.1: sched probes changed from tp/sched/* to tp_btf + raw_tp
+  (standard tp lacks tgid access required for Wait-For Graph)
+- § 2.2: transport diagram corrected — set_autocreate(heap, false)
+  moved to ringbuf success path; probe_tp_btf step added
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>5a14df6468af08da21c9115011d30deeec75e71d
+fix: unify project name to wPerf (drop -rs suffix)
+
+- Rename wPerf-rs → wPerf across all design docs and ADR files
+- Replace custom commit-msg hook with Cadence dedup-trailers.sh
+  (more capable: dedup trailers, strip separators, collapse blanks)
+- Update repo description and project board title
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>51c08a2063596e692679ed5abbde3fb9eba32dc6
+add: final design specification and 12 architecture decision records
+
+Final design document (docs/design/final-design.md) supersedes all
+prior spec documents. Covers 8 chapters: architecture, eBPF probes,
+algorithm pipeline, wPRF v1 format, visualization, verification
+strategy, 16-week gated phases, and risk register.
+
+12 ADR files document the rationale behind each major design decision
+with alternatives considered, evidence from design reviews, and
+consequences. Each ADR is linked from the main design document.
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>978a28e27350d733a6678d167787a442262c7aad
+add: commit-msg hook enforcing sign-off rules
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
+>>>92421de30567fccece24af1c7a3b53a7ab574e69
+initial: wperf project scaffold
+
+Signed-off-by: Adrian Mason <258563901+adrian-mason@users.noreply.github.com>
+
