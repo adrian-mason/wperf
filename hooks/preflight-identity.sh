@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # hooks/preflight-identity.sh — Diagnostic view of git identity for this repo
 #
-# Emits the Q3=A 3-echo matrix:
+# Emits the Q3=A 3-line / 6-field identity matrix (one line per scope,
+# each line exposing user.name and user.email → 3 × 2 = 6 fields):
 #   [--global]   expected baseline (ethercflow on this machine; NOT checked)
 #   [--local]    must resolve to Adrian for wperf; BLOCK signal if missing
 #   [effective]  what `git commit` would actually write; must match Adrian
