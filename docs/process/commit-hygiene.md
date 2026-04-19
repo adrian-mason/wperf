@@ -96,12 +96,15 @@ suspenders optional". L4 in particular is the only defence for the
 
 **L1 ↔ L4 are mutual backstops.** The wrapper reads *stored* config
 (`git -C <repo> config --get user.email`) and therefore does not see a
-one-shot `-c user.email=…` override; the pre-commit hook runs in git's
-own context and *does* see `-c` overrides. Conversely, subcommands the
-wrapper enforces on (e.g. `notes`, `update-ref`, `replace`) do not fire
-pre-commit. When either `core.hooksPath` is unset *or* the wrapper is
-not sourced into the shell, the `-c` override path and the ref-write
-path become unguarded. Preserve both layers.
+one-shot `-c user.email=…` override or `GIT_AUTHOR_* / GIT_COMMITTER_*`
+env vars; the pre-commit hook runs in git's own context and *does* see
+both (`-c` overrides land in effective config, and the hook reads the
+env vars explicitly for both the author and committer roles). Conversely,
+subcommands the wrapper enforces on (e.g. `commit-tree`, `pull`, `notes`,
+`update-ref`, `replace`) do not fire pre-commit. When either
+`core.hooksPath` is unset *or* the wrapper is not sourced into the shell,
+the `-c` / env-var override path and the ref-write path become unguarded.
+Preserve both layers.
 
 > **Cross-domain isomorphism.** L4's "wrapper attach-point defined but
 > workload bypasses it unless shell-init sources the shim" is the git-
@@ -111,7 +114,7 @@ path become unguarded. Preserve both layers.
 > delivery as a runtime-path gate (not a spec-only claim) is therefore
 > a project-wide discipline, not a wrapper-specific quirk.
 
-## 4. Six-Case Self-Test
+## 4. Seven-Case Self-Test
 
 Run before opening a PR that touches any commit-gate artifact:
 
@@ -124,19 +127,29 @@ hooks/self-test/run-all.sh
 | a    | Co-Authored-By stripped                             | L2    |
 | b    | Signed-off-by deduplicated                          | L2    |
 | c    | Clean message passes through unchanged              | L2    |
-| d    | **[LOAD-BEARING]** commit under `wenbo.zhang@iomesh.com` refused | L1 |
+| d    | **[LOAD-BEARING]** commit under `wenbo.zhang@iomesh.com` via `[--local]` refused | L1 |
 | e    | push under `wenbo.zhang@iomesh.com` refused          | L3    |
 | f    | write from external cwd via wrapper refused         | L4    |
+| g    | **[LOAD-BEARING]** commit with `GIT_COMMITTER_*` envvar = ethercflow refused | L1 |
 
-**Case (d) is the primary regression guard for the PR #111 incident.**
-It constructs a repo, sets `[--local] user.email = wenbo.zhang@iomesh.com`
-explicitly, and asserts that the pre-commit hook exits non-zero. If
-case (d) ever regresses, the gate has failed in exactly the shape of the
-original incident — treat any case-(d) failure as a P0 revert signal.
+**Cases (d) and (g) are the primary regression guards for the PR #111
+incident on two orthogonal attack surfaces.** Case (d) covers the
+stored-config path: it sets `[--local] user.email = wenbo.zhang@iomesh.com`
+and asserts the pre-commit hook exits non-zero. Case (g) covers the
+env-var path: it leaves `[--local]` clean (Adrian) but invokes `git commit`
+with `GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL` set to the ethercflow
+identity, and asserts the hook's committer-role check blocks the commit
+(stderr must contain both `identity check FAILED` and the `committer` role
+tag — asserting that the author-role check is not the blocker, since the
+author role is Adrian in this scenario).
 
-Case (f) is non-overlapping with (d): case (d) blocks a locally-configured
-wenbo commit via hook, case (f) blocks a cadence-external cwd write via
-wrapper. Both must pass independently.
+If case (d) or case (g) ever regresses, the gate has failed in the shape of
+the original incident via one of the two documented attack surfaces —
+treat any failure as a P0 revert signal.
+
+Case (f) is non-overlapping with (d)/(g): (d)/(g) block wrong-identity
+commits via the pre-commit hook, (f) blocks a cadence-external cwd write
+via the wrapper. All three must pass independently.
 
 ## 5. Appendix — Preflight BLOCK RCA
 
