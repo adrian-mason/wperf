@@ -1,0 +1,43 @@
+# gamma-1-push-complete — ε force-with-lease push artefact
+timestamp_utc: 2026-04-20T07:33:28Z
+pushed_by: Maestro
+authoriser: Adrian-Mason (chat msg=b3390d93 "go" @ 2026-04-20 15:31:42)
+thread: #p2-dev:83d0107a
+
+## Push command (byte-exact)
+git push \
+  --force-with-lease=refs/heads/main:0a9f8446948c2983582eceecd889677a1e9cee9e \
+  origin \
+  refs/heads/main:refs/heads/main \
+  refs/tags/pre-rewrite-snapshot:refs/tags/pre-rewrite-snapshot \
+  refs/tags/pr111-contaminated-snapshot:refs/tags/pr111-contaminated-snapshot
+
+## Push result
++ 0a9f844...b6c6005 main -> main (forced update)
+
+## Post-push origin state (git ls-remote)
+b6c60050a487801a834b8cfc32a469588a89b479	refs/heads/main
+5f3e72df180e4fdab68ab892c21b7b7a8f3c4559	refs/tags/pr111-contaminated-snapshot
+f736d2fc630470211c5875132a1a50f5d5cd0f19	refs/tags/pre-rewrite-snapshot
+
+## Invariants preserved
+- origin/main tip = local HEAD = b6c60050a487801a834b8cfc32a469588a89b479 (γ fold-tip)
+- frozen-tag pre-rewrite-snapshot tag-obj = f736d2fc630470211c5875132a1a50f5d5cd0f19 (unchanged from pre-push)
+- frozen-tag pr111-contaminated-snapshot tag-obj = 5f3e72df180e4fdab68ab892c21b7b7a8f3c4559 (unchanged from pre-push)
+- spec §2 L34-35 frozen-tag invariant: trip-wire refspecs (non-force) did not error → tags byte-identical
+- spec §5 L99-103 force-with-lease lease pre-image matched origin (0a9f8446 → b6c6005 transition)
+
+## Spec anchor
+§6 L113 ε-phase push --force-with-lease choreography (tracked separately)
+(§5 not triggered — γ.0/γ.3/γ(post-γ.3) three-layer gates all PASS)
+
+## 4-reviewer pre-push LOCK
+- Oracle msg=89c0d4f3 6-axis SEAL + msg=ab29abe9 self-corrected step-sequence
+- Critic msg=c8b91eaf + msg=4f889ec0 (ε-mainline anchor §6 L113 refinement)
+- Challenger msg=f4246c44 + msg=49316b65
+- Probe msg=b302e95f + msg=3bcd8a43 silent-CONCUR posture
+
+## Rollback path (if step-4/5 finds divergence)
+git push --force-with-lease=refs/heads/main:b6c60050a487801a834b8cfc32a469588a89b479 \
+  origin refs/tags/pre-rewrite-snapshot^{}:refs/heads/main
+(restores main to pre-γ tip via frozen tag)
