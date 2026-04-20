@@ -1,0 +1,145 @@
+# γ-post-γ.3 4-check Summary — BPF-scope Regression Guard
+
+Executed: 2026-04-19 (Probe-isolated shell S5 at /tmp/wperf-probe-4check/wperf-probe)
+Bundle source: /tmp/wperf-post-rewrite/post-227c467.bundle
+Bundle sha256: 07f362cc869f8443e7c72e8efccc50d984b6fa09e7bce1c2b455a6b602ca67c9
+
+## Scope anchors
+
+| Anchor | SHA |
+|---|---|
+| PRE_HEAD (= pre-rewrite-snapshot^{commit}) | 0a9f8446948c2983582eceecd889677a1e9cee9e |
+| POST_HEAD (= main^) | 227c467152b1ea15c6e2fb83e8501d17cdbc3de2 |
+| γ.1 rewrite-complete artefact commit (= HEAD) | 34e1b18295b0b930bede0bb4832d53ee97c5bf81 |
+| pre-rewrite-snapshot tag-object | f736d2fc630470211c5875132a1a50f5d5cd0f19 |
+| pr111-contaminated-snapshot tag-object | 5f3e72df180e4fdab68ab892c21b7b7a8f3c4559 |
+| Step-5 fold pre-rewrite (abd3e72) tree | cdd4ccaf3c39c011c26d47c93a3c3c60efd77888 |
+| Step-5 fold post-rewrite (cd88709) tree | cdd4ccaf3c39c011c26d47c93a3c3c60efd77888 |
+| Rewrite-range commit count (full ancestry, `git rev-list --count main^`) | 138 |
+| Range-subset count (`0a9f8446..main^`, excludes 14 SHA-preserved root commits) | 124 |
+
+## Spec citation (authority)
+
+docs/decisions/gamma-post-audit-spec.md §γ (post-γ.3) L88-98:
+- Probe 4-check refs scope:
+  - `gamma-4check-refs.txt` — 4-column sanity table per rewritten commit: sha | author_name | author_email | signoff_count
+  - `gamma-4check-summary.txt` — BPF-scope regression guard: the set of tracepoints, ADRs, and kprobe attach sites touched by any rewritten commit must match the pre-rewrite snapshot byte-for-byte (the rewrite is metadata-only; any code-path drift is a γ bug).
+- Gate L96-98: the 4-check table must show exactly one Signed-off-by trailer pointing to Adrian per commit, and the BPF-scope diff against pre-rewrite-snapshot must be empty.
+
+## (I) 4-check gate per spec §γ L96 — PASS
+
+From gamma-4check-refs.txt (sha256 108beb3a33db7f0657d176b87226a29c32c3f1e242b110eab21075dd0643ce49, 138 rows):
+- Rows with signoff_count != 1: 0 ✅
+- signoff_count distribution: {1: 138} ✅
+- Unique author_name: {Adrian Mason} ✅
+- Unique author_email: {258563901+adrian-mason@users.noreply.github.com} ✅
+- Occurrences of wenbo.zhang@iomesh.com: 0 ✅
+
+## (II) BPF-scope regression guard per spec §γ L93-94 — PASS
+
+Strict BPF attach-surface scope: src/bpf/, src/probe/, docs/decisions/ADR-NNN.md
+
+### (II.a) Path-narrowed diff PRE_HEAD vs POST_HEAD
+
+```
+git diff --stat PRE_HEAD POST_HEAD -- src/bpf/         → empty diff (rc=0, no files)
+git diff --stat PRE_HEAD POST_HEAD -- src/probe/       → empty diff (rc=0, no files)
+git diff --stat PRE_HEAD POST_HEAD -- 'docs/decisions/ADR-*.md' → empty diff (rc=0, no files)
+```
+
+### (II.b) Blob-inventory byte-for-byte parity
+
+```
+git ls-tree -r PRE_HEAD  -- src/bpf/ src/probe/ ADR-*.md | sort | sha256sum
+  = 3a1cc388837f86f006633ae5e529cd353ff05257fdfbc57fc9f83ccd1c2a8ee2
+git ls-tree -r POST_HEAD -- src/bpf/ src/probe/ ADR-*.md | sort | sha256sum
+  = 3a1cc388837f86f006633ae5e529cd353ff05257fdfbc57fc9f83ccd1c2a8ee2
+```
+PRE == POST ✅ (blob SHAs + paths + modes all identical across 25 files: 5 BPF + 2 probe + 18 ADR)
+
+### (II.c) Per-ADR blob parity (18/18)
+
+All 18 ADR-*.md blob SHAs byte-identical PRE=POST:
+- ADR-001.md `ac6c58291e3dc4383f00901a10efd26c5d2ff7ba`
+- ADR-002.md `d1c4268bc3fb9af1e3ffcf77a5d4df93193421de`
+- ADR-002-supplement.md `6c7b556137092ed01b0e143925997e76cc6ec0e7`
+- ADR-003.md `77a35e76f20dee4dcf906f7077caa209bab0fbb2`
+- ADR-004.md `efe01a7b13b9ec3699a5c1b2e06af672a1ccca1a`
+- ADR-004-supplement.md `bfafedf7da0078d7f47b096f22bc2262fd4baea8`
+- ADR-005.md `b859e46972a1bdc27f054af0ef22c7ef8a338221`
+- ADR-006.md `57f7fe26ce9e7c2fa012f20fbf9f3feb6d1b5e08`
+- ADR-007.md `e45137612170cc4e5469f0742c29fed65c5ccc8f`
+- ADR-008.md `fb12b24f9261494a317685ca83e026ce90c49310`
+- ADR-009.md `2e38989d7a49ad2ece7dac831047c66f7c9bf5f6`
+- ADR-010.md `d5ad90011539fbcb215a042977512cbbf44d88ca`
+- ADR-011.md `140f963dfc861e46858203ef4b62055a3b2310f7`
+- ADR-012.md `3f7a29633dc4f56f50fb41b337f79c67027577b7`
+- ADR-013.md `754f1050d11b9b7eb60b85e0cf29147935556a7c`
+- ADR-014.md `0f06e222a7eb3fb44080d09eae8f5eda51428491`
+- ADR-015.md `57d8030abb39725fb5d0bc076165f1965f975e69`
+- ADR-016.md `044691226ea1d0d4b448cd9f125f99b206c79141`
+
+### (II.d) Per-BPF-source blob parity (5/5)
+
+All 5 src/bpf/ files byte-identical PRE=POST:
+- src/bpf/compat.bpf.h `c0e2790807270056827d0e6a1e64e913d95a9239`
+- src/bpf/core_fixes.bpf.h `e639ebb66aa81257aa9a021aa855ec5feabcdcb3`
+- src/bpf/vmlinux.h.vendored `b39957f64c0feb3f2a913ba50a823170f5a8f337`
+- src/bpf/wperf.bpf.c `d3afbcbc27346abf2d1d4ffac70a85181d542bbd` (tracepoint/kprobe/fentry/SEC attach sites)
+- src/bpf/wperf.h `68d664c31086f73bca5eed3321b90a4d1d02de1f` (probe-payload struct definitions)
+
+### (II.e) Per-probe-source blob parity (2/2)
+
+All 2 src/probe/ files byte-identical PRE=POST:
+- src/probe/features.rs `4e5802b31091fb2a3582e961ce113ef9498f7639`
+- src/probe/mod.rs `098859dc050c338d727aa2f8d1d167f3d5a18d01`
+
+### (II.f) Step-5 fold (sole-determinative contamination) tree-parity spot-check
+
+Commit pair abd3e72 (PRE-rewrite) → cd88709 (POST-rewrite) — dedicated spot-report per Oracle msg=8c411198 §4:
+- abd3e72 tree: cdd4ccaf3c39c011c26d47c93a3c3c60efd77888
+- cd88709 tree: cdd4ccaf3c39c011c26d47c93a3c3c60efd77888
+STEP5_TREE_PARITY: YES ✅ (strongest empirical proof of metadata-only contract on the sole contaminated commit)
+
+### (II.g) Frozen-tag preservation per §2 L34-35
+
+Annotated tag-object SHA byte-preserved across γ.1:
+- pre-rewrite-snapshot: tag-obj f736d2fc630470211c5875132a1a50f5d5cd0f19 → peels 0a9f8446948c2983582eceecd889677a1e9cee9e ✅
+- pr111-contaminated-snapshot: tag-obj 5f3e72df180e4fdab68ab892c21b7b7a8f3c4559 → peels abd3e72007bbf19762b8cc6befe7936ef519be86 ✅
+
+## (III) Non-BPF-scope tree delta — documented as γ.1 operational infrastructure (NOT regression)
+
+Full tree-diff PRE_HEAD vs POST_HEAD yields 5 non-BPF-scope files, all added/modified by the γ.1 bundle-commit (2f776a38c833948855d61b842676ba1a75c9ee94) for operational necessity:
+
+- `docs/audit/gamma/gamma-0-preflight-20260419T091516Z.txt` (NEW) — γ.0 preflight artefact (Challenger)
+- `docs/audit/gamma/gamma-1-rewrite-plan-20260419T093107Z.txt` (NEW) — γ.1 rewrite-plan artefact (Maestro)
+- `docs/decisions/gamma-post-audit-spec.md` (MOD) — §2 L27-28 spec-harmonisation per Oracle msg=61dbb8f9 RULING (drafting-shorthand cleanup; not a BPF attach-surface)
+- `scripts/gamma1-selftest.sh` (NEW) — γ.1 callback selftest corpus (5-case)
+- `scripts/gamma1_filter_repo.py` (NEW) — γ.1 filter-repo callback implementation
+
+These are pre-rewrite bundle-commit tree-additions for γ.1 operational purposes (audit artefacts + tooling), NOT code-path drift from the metadata-only rewrite itself. The metadata-only rewrite is proven tree-preserving by Step-5 fold (II.f) and strict attach-surface parity (II.a-II.e).
+
+Classification: EXPECTED operational tree-delta, outside BPF-scope regression guard.
+
+## (IV) Source-independence ladder
+
+Per Challenger msg=c8f45cf4 §3(d) Catalog 21 N≥3 redundancy floor, now N=5 POST-side empirical sources:
+
+| Source | Object-DB | Role |
+|---|---|---|
+| S1 Maestro same-DB | Maestro γ worktree | A1-A4 self-attestation |
+| S2 Challenger same-DB | Maestro γ worktree clone | A1-A4 re-derivation + 124-vs-138 reconciliation |
+| S3 Challenger separate-DB via bundle | /tmp/… (Challenger clean-shell) | A1-A4 + recipe-quirk catches |
+| S4 Oracle separate-DB via bundle | /tmp/wperf-oracle-gamma3/ | A1-A4 canonical γ.3 artefact emission (sha256 per Oracle msg=8c411198 §5) |
+| S5 Probe separate-DB via bundle | /tmp/wperf-probe-4check/wperf-probe (this shell) | 4-check refs + BPF-scope regression guard |
+
+## (V) Composite verdict
+
+- (I) 4-check gate per spec §γ L96: PASS (138/138 rows green; exactly-one-Adrian-SoB invariant holds)
+- (II) BPF-scope regression guard per spec §γ L93-94: PASS (strict attach-surface diff byte-empty; blob-inventory hash PRE=POST; Step-5 fold tree-parity confirmed on sole-determinative contamination)
+- (III) Non-BPF-scope delta: documented and classified as γ.1 operational infrastructure (outside BPF-scope regression scope)
+- (IV) Source-independence: N=5 exceeds Catalog 21 N≥3 floor
+
+**γ-post-γ.3 VERDICT: ✅ PASS (both gates green; no γ bug surfaced)**
+
+ε force-with-lease is now gate-unblocked per spec §γ(post-γ.3) gate satisfaction.
