@@ -20,11 +20,13 @@
 
 /* Event type discriminants — must match Rust EventType repr(u8). */
 enum wperf_event_type {
-	WPERF_EVENT_SWITCH     = 1,
-	WPERF_EVENT_WAKEUP     = 2,
-	WPERF_EVENT_WAKEUP_NEW = 3,
-	WPERF_EVENT_EXIT       = 4,
-	WPERF_EVENT_FUTEX_WAIT = 5,
+	WPERF_EVENT_SWITCH       = 1,
+	WPERF_EVENT_WAKEUP       = 2,
+	WPERF_EVENT_WAKEUP_NEW   = 3,
+	WPERF_EVENT_EXIT         = 4,
+	WPERF_EVENT_FUTEX_WAIT   = 5,
+	WPERF_EVENT_IO_ISSUE     = 6,
+	WPERF_EVENT_IO_COMPLETE  = 7,
 };
 
 /* Futex operation constants (from linux/futex.h).
@@ -52,6 +54,23 @@ enum wperf_event_type {
  *   next_tid  → uaddr upper 32 bits
  *   flags     → futex op (after FUTEX_CMD_MASK)
  *   prev_pid, next_pid, prev_state → unused (zero)
+ */
+
+/*
+ * IO event field mapping (reuses 40-byte wperf_event struct, Phase 2b issue #38):
+ *   timestamp_ns     → block_rq_issue / block_rq_complete ktime_get_boot_ns()
+ *   pid              → submitter tgid (userspace PID; block_rq_complete reads from pending_io)
+ *   tid              → submitter kernel tid (same source as pid)
+ *   prev_tid         → sector lower 32 bits  (packed u64 sector)
+ *   next_tid         → sector upper 32 bits  (packed u64 sector)
+ *   prev_pid         → dev_t (u32)           — observability-only per ADR-009 / Challenger C11
+ *   next_pid         → nr_sector (u32)       — request size in 512-byte sectors
+ *   flags            → reserved (0; Path 1 sync-direct IO does not differentiate rw flags)
+ *   prev_state, cpu  → unused / standard fill
+ *
+ * Discipline: correlate.rs Phase 2b MUST NOT dispatch on event.dev — load-bearing
+ * comment required at the dev-read site. Retained for forward-compat with per-device
+ * disk nodes (#115).
  */
 
 /*

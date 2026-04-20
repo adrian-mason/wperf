@@ -171,6 +171,11 @@ pub fn correlate_events(
             Some(EventType::FutexWait) => {
                 handle_futex_wait(event, &mut pending_futex);
             }
+            Some(EventType::IoIssue) | Some(EventType::IoComplete) => {
+                // IO synth-edge generation lands in a later commit (issue #38
+                // commit-4 per plan). Scaffold: enum variants wired end-to-end
+                // so BPF discriminants stay in lockstep; no graph mutation yet.
+            }
             None => {}
         }
     }

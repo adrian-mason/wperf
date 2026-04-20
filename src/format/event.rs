@@ -40,6 +40,8 @@ pub enum EventType {
     WakeupNew = 3,
     Exit = 4,
     FutexWait = 5,
+    IoIssue = 6,
+    IoComplete = 7,
 }
 
 impl EventType {
@@ -50,6 +52,8 @@ impl EventType {
             3 => Some(Self::WakeupNew),
             4 => Some(Self::Exit),
             5 => Some(Self::FutexWait),
+            6 => Some(Self::IoIssue),
+            7 => Some(Self::IoComplete),
             _ => None,
         }
     }
@@ -142,6 +146,24 @@ impl WperfEvent {
     pub fn futex_op(&self) -> u32 {
         self.flags
     }
+
+    /// IO request sector (64-bit, packed). Only meaningful for `IoIssue` / `IoComplete` events.
+    /// Stored as: `prev_tid` = lower 32 bits, `next_tid` = upper 32 bits.
+    pub fn io_sector(&self) -> u64 {
+        u64::from(self.next_tid) << 32 | u64::from(self.prev_tid)
+    }
+
+    /// IO device (`dev_t`, 32-bit). Only meaningful for `IoIssue` / `IoComplete` events.
+    /// ADR-009 / issue #38 C11: observability-only in Phase 2b — MUST NOT be used for
+    /// graph dispatch. Retained for forward-compat with per-device disk nodes (#115).
+    pub fn io_dev(&self) -> u32 {
+        self.prev_pid
+    }
+
+    /// IO request size in 512-byte sectors. Only meaningful for `IoIssue` / `IoComplete` events.
+    pub fn io_nr_sector(&self) -> u32 {
+        self.next_pid
+    }
 }
 
 #[cfg(test)]
@@ -228,12 +250,63 @@ mod tests {
         assert_eq!(EventType::from_u8(3), Some(EventType::WakeupNew));
         assert_eq!(EventType::from_u8(4), Some(EventType::Exit));
         assert_eq!(EventType::from_u8(5), Some(EventType::FutexWait));
+        assert_eq!(EventType::from_u8(6), Some(EventType::IoIssue));
+        assert_eq!(EventType::from_u8(7), Some(EventType::IoComplete));
     }
 
     #[test]
     fn event_type_enum_unknown() {
         assert_eq!(EventType::from_u8(0), None);
+        assert_eq!(EventType::from_u8(8), None);
         assert_eq!(EventType::from_u8(255), None);
+    }
+
+    fn sample_io_issue_event() -> WperfEvent {
+        WperfEvent {
+            timestamp_ns: 1_000_200_000,
+            pid: 300,
+            tid: 301,
+            prev_tid: 0x0000_0040u32, // sector lower 32 (sector = 64)
+            next_tid: 0x0000_0000u32, // sector upper 32
+            prev_pid: 0x0000_0801u32, // dev_t (major=8, minor=1; observability-only)
+            next_pid: 8,              // nr_sector = 8 (4KiB)
+            cpu: 1,
+            event_type: EventType::IoIssue as u8,
+            prev_state: 0,
+            flags: 0,
+        }
+    }
+
+    #[test]
+    fn io_event_roundtrip() {
+        let ev = sample_io_issue_event();
+        let bytes = ev.to_bytes();
+        let parsed = WperfEvent::from_bytes(&bytes);
+        assert_eq!(ev, parsed);
+        assert_eq!(parsed.event_type_enum(), Some(EventType::IoIssue));
+    }
+
+    #[test]
+    fn io_sector_accessor() {
+        let ev = sample_io_issue_event();
+        assert_eq!(ev.io_sector(), 64u64);
+
+        let mut ev2 = ev;
+        ev2.prev_tid = 0xFFFF_FFFFu32;
+        ev2.next_tid = 0x0000_0001u32;
+        assert_eq!(ev2.io_sector(), 0x0000_0001_FFFF_FFFFu64);
+    }
+
+    #[test]
+    fn io_dev_accessor() {
+        let ev = sample_io_issue_event();
+        assert_eq!(ev.io_dev(), 0x0000_0801u32);
+    }
+
+    #[test]
+    fn io_nr_sector_accessor() {
+        let ev = sample_io_issue_event();
+        assert_eq!(ev.io_nr_sector(), 8);
     }
 
     #[test]
