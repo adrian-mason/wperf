@@ -38,7 +38,7 @@ f736d2fc630470211c5875132a1a50f5d5cd0f19	refs/tags/pre-rewrite-snapshot
 - Challenger msg=f4246c44 + msg=49316b65
 - Probe msg=b302e95f + msg=3bcd8a43 silent-CONCUR posture
 
-## Rollback path (if step-4/5 finds divergence)
+## Rollback path (if step-5 finds divergence)
 git push --force-with-lease=refs/heads/main:b6c60050a487801a834b8cfc32a469588a89b479 \
   origin refs/tags/pre-rewrite-snapshot^{}:refs/heads/main
 (restores main to pre-γ tip via frozen tag)
