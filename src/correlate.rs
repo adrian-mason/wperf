@@ -114,6 +114,12 @@ pub struct CorrelationStats {
     /// Edges filtered as spurious wakeups (on-CPU < threshold after wakeup).
     /// **Canonical coverage metric** (§2.5 / §3.8).
     pub false_wakeup_filtered_count: u64,
+    /// Events whose `event_type` byte did not match any known `EventType`
+    /// discriminant. Safety net for forward-compatible BPF→userspace bisects
+    /// across multi-commit PR ranges — a new BPF discriminant shipped before
+    /// the matching Rust variant lands is dropped here rather than panicking.
+    /// *Internal diagnostic stat* — not a canonical coverage metric.
+    pub unknown_event_type_count: u64,
 }
 
 /// Correlate a globally timestamp-sorted event stream into a `WaitForGraph`.
@@ -171,12 +177,20 @@ pub fn correlate_events(
             Some(EventType::FutexWait) => {
                 handle_futex_wait(event, &mut pending_futex);
             }
-            Some(EventType::IoIssue) | Some(EventType::IoComplete) => {
+            Some(EventType::IoIssue | EventType::IoComplete) => {
                 // IO synth-edge generation lands in a later commit (issue #38
                 // commit-4 per plan). Scaffold: enum variants wired end-to-end
                 // so BPF discriminants stay in lockstep; no graph mutation yet.
             }
-            None => {}
+            None => {
+                if stats.unknown_event_type_count == 0 {
+                    eprintln!(
+                        "correlate: unknown event_type discriminant {} at ts_ns={} — dropping (forward-compat bisect guard; further occurrences suppressed, see unknown_event_type_count)",
+                        event.event_type, event.timestamp_ns
+                    );
+                }
+                stats.unknown_event_type_count += 1;
+            }
         }
     }
 
@@ -394,6 +408,65 @@ mod tests {
         assert_eq!(graph.node_count(), 0);
         assert_eq!(stats.events_processed, 0);
         assert_eq!(stats.edges_created, 0);
+    }
+
+    #[test]
+    fn unknown_event_type_drops_and_counts() {
+        // Forward-compat bisect guard: a BPF discriminant shipped ahead of
+        // the matching Rust variant must drop safely with counter increment,
+        // never panic. Simulates commit-2-ships-before-commit-3 window.
+        let mut bad = WperfEvent {
+            timestamp_ns: 1_000_000,
+            pid: 100,
+            tid: 101,
+            prev_tid: 0,
+            next_tid: 0,
+            prev_pid: 0,
+            next_pid: 0,
+            cpu: 0,
+            event_type: 99,
+            prev_state: 0,
+            flags: 0,
+        };
+        let (graph, stats) = correlate(&[bad]);
+        assert_eq!(graph.node_count(), 0);
+        assert_eq!(stats.edges_created, 0);
+        assert_eq!(stats.unknown_event_type_count, 1);
+        assert_eq!(stats.events_processed, 1);
+
+        // Multiple unknown events accumulate.
+        bad.timestamp_ns = 2_000_000;
+        let (_, stats2) = correlate(&[bad, bad]);
+        assert_eq!(stats2.unknown_event_type_count, 2);
+    }
+
+    #[test]
+    fn io_discriminants_are_known_but_noop_in_commit_1() {
+        // commit-1 scaffold: IoIssue / IoComplete must NOT count as unknown —
+        // variants are wired; synth-edge generation lands in commit-4.
+        let io_issue = WperfEvent {
+            timestamp_ns: 1_000_000,
+            pid: 100,
+            tid: 101,
+            prev_tid: 0,
+            next_tid: 0,
+            prev_pid: 0,
+            next_pid: 0,
+            cpu: 0,
+            event_type: EventType::IoIssue as u8,
+            prev_state: 0,
+            flags: 0,
+        };
+        let io_complete = WperfEvent {
+            event_type: EventType::IoComplete as u8,
+            timestamp_ns: 2_000_000,
+            ..io_issue
+        };
+        let (graph, stats) = correlate(&[io_issue, io_complete]);
+        assert_eq!(graph.node_count(), 0);
+        assert_eq!(stats.edges_created, 0);
+        assert_eq!(stats.unknown_event_type_count, 0);
+        assert_eq!(stats.events_processed, 2);
     }
 
     #[test]
