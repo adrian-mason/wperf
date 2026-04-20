@@ -24,11 +24,12 @@ f736d2fc630470211c5875132a1a50f5d5cd0f19	refs/tags/pre-rewrite-snapshot
 - origin/main tip = local HEAD = b6c60050a487801a834b8cfc32a469588a89b479 (γ fold-tip)
 - frozen-tag pre-rewrite-snapshot tag-obj = f736d2fc630470211c5875132a1a50f5d5cd0f19 (unchanged from pre-push)
 - frozen-tag pr111-contaminated-snapshot tag-obj = 5f3e72df180e4fdab68ab892c21b7b7a8f3c4559 (unchanged from pre-push)
-- spec §2 L34-35 frozen-tag invariant: trip-wire refspecs (non-force) did not error → tags byte-identical
-- spec §5 L99-103 force-with-lease lease pre-image matched origin (0a9f8446 → b6c6005 transition)
+- spec §2 L38-39 frozen-tag invariant: trip-wire refspecs (non-force) did not error → tags byte-identical
+- ADR-017 §2.1 lease pre-image binding: 0a9f8446 → b6c6005 transition (force-with-lease semantics live in ADR-017, not gamma-post-audit-spec)
+- anchors verified against contents-API readback at 2026-04-20T18:45Z (endpoint: gh api repos/adrian-mason/wperf/contents/docs/decisions/gamma-post-audit-spec.md)
 
 ## Spec anchor
-§6 L113 ε-phase push --force-with-lease choreography (tracked separately)
+§6 L128 ε-phase push --force-with-lease choreography (tracked separately)
 (§5 not triggered — γ.0/γ.3/γ(post-γ.3) three-layer gates all PASS)
 
 ## 4-reviewer pre-push LOCK
