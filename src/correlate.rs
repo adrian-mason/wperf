@@ -88,6 +88,43 @@ struct PendingEdge {
     wait_type: Option<WaitType>,
 }
 
+/// Key identifying an in-flight block I/O request in userspace.
+///
+/// BPF already pairs issue/complete kernel-side via `struct request *`, but
+/// that pointer is not propagated to userspace (ABI-unstable, and emitting
+/// it would add 8 bytes to every IO event). Userspace re-pairs using the
+/// stable tuple `(dev, sector)` carried on both `IoIssue` and `IoComplete`
+/// events. `dev` alone is insufficient — many concurrent requests target
+/// the same device — and `sector` alone collides across devices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct IoKey {
+    dev: u32,
+    sector: u64,
+}
+
+impl IoKey {
+    fn from_event(event: &WperfEvent) -> Self {
+        Self {
+            dev: event.io_dev(),
+            sector: event.io_sector(),
+        }
+    }
+}
+
+/// State retained between an `IoIssue` and its matching `IoComplete`.
+///
+/// Submitter attribution is taken verbatim from the event — BPF already
+/// records the submitter at issue time and re-stamps it onto the completion
+/// event, so `pid`/`tid` on the `IoComplete` event refer to the original
+/// submitter regardless of which task the softirq/IRQ completion ran on
+/// (ADR-009 §3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PendingIo {
+    submitter_tgid: u32,
+    submitter_tid: u32,
+    issue_ts_ns: u64,
+}
+
 /// Statistics from the correlation pass.
 ///
 /// # Canonical vs diagnostic metrics
@@ -150,6 +187,7 @@ pub fn correlate_events(
     let mut off_cpu: HashMap<u32, OffCpuRecord> = HashMap::new();
     let mut pending_futex: HashMap<u32, PendingFutex> = HashMap::new();
     let mut pending_edges: HashMap<u32, PendingEdge> = HashMap::new();
+    let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
 
     for event in events {
         stats.events_processed += 1;
@@ -177,10 +215,11 @@ pub fn correlate_events(
             Some(EventType::FutexWait) => {
                 handle_futex_wait(event, &mut pending_futex);
             }
-            Some(EventType::IoIssue | EventType::IoComplete) => {
-                // IO synth-edge generation lands in a later commit (issue #38
-                // commit-4 per plan). Scaffold: enum variants wired end-to-end
-                // so BPF discriminants stay in lockstep; no graph mutation yet.
+            Some(EventType::IoIssue) => {
+                handle_io_issue(event, &mut pending_io);
+            }
+            Some(EventType::IoComplete) => {
+                handle_io_complete(event, &mut pending_io);
             }
             None => {
                 if stats.unknown_event_type_count == 0 {
@@ -318,6 +357,34 @@ fn handle_futex_wait(event: &WperfEvent, pending_futex: &mut HashMap<u32, Pendin
     );
 }
 
+/// Handle a `block_rq_issue` event — record the in-flight request so the
+/// matching `block_rq_complete` can recover `(submitter, issue_ts)`.
+///
+/// Synthetic edge generation against the `block_device:<dev>` pseudo-thread
+/// lands in a later commit (issue #38 commit-4); this commit tracks only the
+/// userspace lifecycle. Orphan / pending-at-end accounting is deferred to
+/// commit-5 (`HealthMetrics`).
+fn handle_io_issue(event: &WperfEvent, pending_io: &mut HashMap<IoKey, PendingIo>) {
+    pending_io.insert(
+        IoKey::from_event(event),
+        PendingIo {
+            submitter_tgid: event.pid,
+            submitter_tid: event.tid,
+            issue_ts_ns: event.timestamp_ns,
+        },
+    );
+}
+
+/// Handle a `block_rq_complete` event — drain the matching issue record.
+///
+/// BPF re-stamps the original submitter onto the completion event (ADR-009
+/// §3), so the `pid`/`tid` carried here are trustworthy for attribution; the
+/// only job of userspace is to pair with the issue and surface the (delta,
+/// submitter) tuple to commit-4's edge generator.
+fn handle_io_complete(event: &WperfEvent, pending_io: &mut HashMap<IoKey, PendingIo>) {
+    pending_io.remove(&IoKey::from_event(event));
+}
+
 /// Handle a `sched_wakeup` or `sched_wakeup_new` event.
 ///
 /// Records the waker for an off-CPU thread. Last-wake-wins policy:
@@ -441,9 +508,10 @@ mod tests {
     }
 
     #[test]
-    fn io_discriminants_are_known_but_noop_in_commit_1() {
-        // commit-1 scaffold: IoIssue / IoComplete must NOT count as unknown —
-        // variants are wired; synth-edge generation lands in commit-4.
+    fn io_discriminants_dispatch_without_graph_mutation() {
+        // commit-3 scaffold: IoIssue / IoComplete dispatch into pending_io
+        // lifecycle handlers but must NOT count as unknown and must NOT
+        // mutate the graph — synth-edge generation lands in commit-4.
         let io_issue = WperfEvent {
             timestamp_ns: 1_000_000,
             pid: 100,
@@ -1058,5 +1126,175 @@ mod tests {
         assert_eq!(stats.false_wakeup_filtered_count, 2);
         assert_eq!(stats.edges_created, 0);
         assert_eq!(graph.edge_count(), 0);
+    }
+
+    // --- IO dispatch lifecycle (commit-3) -----------------------------------
+    //
+    // The handlers are tested directly rather than through `correlate()`
+    // because commit-3 deliberately produces no observable output (no edges,
+    // no counters — those are commit-4 / commit-5). The only state visible
+    // in-scope is `pending_io`, which lives inside `correlate_events` and is
+    // not exposed to callers.
+
+    #[allow(clippy::similar_names)] // tgid / tid mirror WperfEvent field names
+    fn io_issue_event(ts: u64, tgid: u32, tid: u32, dev: u32, sector: u64) -> WperfEvent {
+        WperfEvent {
+            timestamp_ns: ts,
+            pid: tgid,
+            tid,
+            // io_sector() packs prev_tid | next_tid<<32
+            prev_tid: u32::try_from(sector & 0xFFFF_FFFF).unwrap(),
+            next_tid: u32::try_from(sector >> 32).unwrap(),
+            // io_dev() reads prev_pid
+            prev_pid: dev,
+            // io_nr_sector() reads next_pid — observability-only in Phase 2b
+            next_pid: 8,
+            cpu: 0,
+            event_type: EventType::IoIssue as u8,
+            prev_state: 0,
+            flags: 0,
+        }
+    }
+
+    #[allow(clippy::similar_names)]
+    fn io_complete_event(ts: u64, tgid: u32, tid: u32, dev: u32, sector: u64) -> WperfEvent {
+        WperfEvent {
+            event_type: EventType::IoComplete as u8,
+            timestamp_ns: ts,
+            ..io_issue_event(ts, tgid, tid, dev, sector)
+        }
+    }
+
+    #[test]
+    fn handle_io_issue_records_submitter_and_ts() {
+        let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let ev = io_issue_event(1_000_000, 100, 101, 0x800_0002, 0xDEAD_BEEF_0000_1234);
+
+        handle_io_issue(&ev, &mut pending_io);
+
+        assert_eq!(pending_io.len(), 1);
+        let key = IoKey {
+            dev: 0x800_0002,
+            sector: 0xDEAD_BEEF_0000_1234,
+        };
+        let rec = pending_io.get(&key).expect("IoKey must match");
+        assert_eq!(rec.submitter_tgid, 100);
+        assert_eq!(rec.submitter_tid, 101);
+        assert_eq!(rec.issue_ts_ns, 1_000_000);
+    }
+
+    #[test]
+    fn handle_io_complete_drains_matching_issue() {
+        let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let issue = io_issue_event(1_000_000, 100, 101, 0x800_0002, 0x1000);
+        let complete = io_complete_event(1_500_000, 100, 101, 0x800_0002, 0x1000);
+
+        handle_io_issue(&issue, &mut pending_io);
+        handle_io_complete(&complete, &mut pending_io);
+
+        assert!(pending_io.is_empty(), "issue/complete pair must drain");
+    }
+
+    #[test]
+    fn handle_io_complete_without_matching_issue_is_noop() {
+        // Orphan completion: BPF dropped the issue (per-CPU buffer full) or
+        // buffer reorder/truncation. Commit-5 adds io_orphan_complete_count;
+        // for now, assert no panic and no insertion.
+        let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let complete = io_complete_event(1_500_000, 100, 101, 0x800_0002, 0x1000);
+
+        handle_io_complete(&complete, &mut pending_io);
+
+        assert!(pending_io.is_empty());
+    }
+
+    #[test]
+    fn pending_io_keyed_by_dev_and_sector_not_just_sector() {
+        // Two devices, same sector — must NOT collide. Disambiguation by
+        // (dev, sector) is the whole reason IoKey exists.
+        let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let issue_dev1 = io_issue_event(1_000_000, 100, 101, 0x800_0001, 0x2000);
+        let issue_dev2 = io_issue_event(1_000_001, 200, 201, 0x800_0002, 0x2000);
+
+        handle_io_issue(&issue_dev1, &mut pending_io);
+        handle_io_issue(&issue_dev2, &mut pending_io);
+
+        assert_eq!(pending_io.len(), 2);
+
+        // Completing dev1's IO must not touch dev2's entry.
+        let complete_dev1 = io_complete_event(1_500_000, 100, 101, 0x800_0001, 0x2000);
+        handle_io_complete(&complete_dev1, &mut pending_io);
+
+        assert_eq!(pending_io.len(), 1);
+        let dev2_key = IoKey {
+            dev: 0x800_0002,
+            sector: 0x2000,
+        };
+        assert!(pending_io.contains_key(&dev2_key));
+    }
+
+    #[test]
+    fn concurrent_same_device_multiple_pending() {
+        // Typical case: one tgid submits multiple IOs in flight concurrently
+        // to the same device. Each (dev, sector) is independent.
+        let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        for sector in [0x1000u64, 0x2000, 0x3000, 0x4000] {
+            let ev = io_issue_event(1_000_000 + sector, 100, 101, 0x800_0001, sector);
+            handle_io_issue(&ev, &mut pending_io);
+        }
+
+        assert_eq!(pending_io.len(), 4);
+
+        // Out-of-order completions (NVMe queue reorder is realistic).
+        for sector in [0x3000u64, 0x1000, 0x4000, 0x2000] {
+            let ev = io_complete_event(2_000_000 + sector, 100, 101, 0x800_0001, sector);
+            handle_io_complete(&ev, &mut pending_io);
+        }
+
+        assert!(pending_io.is_empty());
+    }
+
+    #[test]
+    fn repeated_issue_same_key_overwrites() {
+        // A rare case: same (dev, sector) seen twice before any complete.
+        // Possible causes: BPF dropped an intermediate complete, or block
+        // layer reissued a request. Last-writer-wins is the safe default —
+        // matches BPF-side `bpf_map_update_elem(.., BPF_ANY)` semantics
+        // (wperf.bpf.c handle_block_rq_issue).
+        let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let first = io_issue_event(1_000_000, 100, 101, 0x800_0001, 0x1000);
+        let second = io_issue_event(2_000_000, 200, 201, 0x800_0001, 0x1000);
+
+        handle_io_issue(&first, &mut pending_io);
+        handle_io_issue(&second, &mut pending_io);
+
+        assert_eq!(pending_io.len(), 1);
+        let key = IoKey {
+            dev: 0x800_0001,
+            sector: 0x1000,
+        };
+        let rec = pending_io[&key];
+        assert_eq!(rec.submitter_tgid, 200);
+        assert_eq!(rec.submitter_tid, 201);
+        assert_eq!(rec.issue_ts_ns, 2_000_000);
+    }
+
+    #[test]
+    fn io_stream_through_correlate_events_does_not_panic() {
+        // End-to-end: IoIssue / IoComplete events flow through correlate()
+        // without touching unknown counters, edges, or other stats.
+        let events = vec![
+            io_issue_event(1_000_000, 100, 101, 0x800_0001, 0x1000),
+            io_complete_event(1_500_000, 100, 101, 0x800_0001, 0x1000),
+            io_issue_event(2_000_000, 200, 201, 0x800_0002, 0x2000),
+            // No matching complete for this second issue — pending-at-end.
+        ];
+
+        let (graph, stats) = correlate(&events);
+
+        assert_eq!(graph.node_count(), 0);
+        assert_eq!(stats.edges_created, 0);
+        assert_eq!(stats.unknown_event_type_count, 0);
+        assert_eq!(stats.events_processed, 3);
     }
 }
