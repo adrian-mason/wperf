@@ -316,11 +316,7 @@ struct BtfGuard(*mut libbpf_sys::btf);
 impl BtfGuard {
     fn load_vmlinux() -> Option<Self> {
         let p = unsafe { libbpf_sys::btf__load_vmlinux_btf() };
-        if p.is_null() {
-            None
-        } else {
-            Some(Self(p))
-        }
+        if p.is_null() { None } else { Some(Self(p)) }
     }
 }
 

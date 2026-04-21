@@ -163,14 +163,26 @@ fn record_impl(args: &RecordArgs, stop_requested: &Arc<AtomicBool>) -> Result<()
         TracepointMode::TpBtf => {
             open_skel.progs.handle_sched_switch_raw.set_autoload(false);
             open_skel.progs.handle_sched_wakeup_raw.set_autoload(false);
-            open_skel.progs.handle_block_rq_issue_raw.set_autoload(false);
-            open_skel.progs.handle_block_rq_complete_raw.set_autoload(false);
+            open_skel
+                .progs
+                .handle_block_rq_issue_raw
+                .set_autoload(false);
+            open_skel
+                .progs
+                .handle_block_rq_complete_raw
+                .set_autoload(false);
         }
         TracepointMode::RawTp => {
             open_skel.progs.handle_sched_switch_btf.set_autoload(false);
             open_skel.progs.handle_sched_wakeup_btf.set_autoload(false);
-            open_skel.progs.handle_block_rq_issue_btf.set_autoload(false);
-            open_skel.progs.handle_block_rq_complete_btf.set_autoload(false);
+            open_skel
+                .progs
+                .handle_block_rq_issue_btf
+                .set_autoload(false);
+            open_skel
+                .progs
+                .handle_block_rq_complete_btf
+                .set_autoload(false);
         }
     }
 
