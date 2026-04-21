@@ -90,6 +90,10 @@ pub struct FeatureMatrix {
     pub has_cgroupv2: bool,
     /// Whether `fentry` attachment is supported (kernel 5.5+).
     pub has_fentry: bool,
+    /// Whether `block_rq_issue` uses the post-5.11 single-arg form (rq at ctx[0]).
+    /// False → pre-5.11 dual-arg form (q, rq) with rq at ctx[1]. Consumed by
+    /// Phase 2b #38 P2b-01 `block_rq` tracepoints (`wperf.bpf.c` `targ_single` rodata).
+    pub block_rq_issue_single_arg: bool,
 }
 
 /// Sysfs/tracefs paths used by the probing layer.
@@ -251,17 +255,23 @@ pub fn probe_bpf_loop() -> Result<bool, ProbeError> {
 
 /// Probe whether `tp_btf` attachment is supported for scheduler tracepoints.
 ///
-/// Requires loading a minimal BPF program that attaches to `tp_btf/sched_switch`.
-/// Falls back to `RawTp` if the attach fails.
+/// Uses BTF typedef presence (`btf_trace_sched_switch`) as the gating signal:
+/// the typedef is emitted only when `DECLARE_TRACE(sched_switch, ...)` reaches
+/// BTF (kernel 5.5+ with `CONFIG_DEBUG_INFO_BTF`). An absent typedef means
+/// `tp_btf/sched_switch` is not loadable.
 ///
-/// Full implementation depends on skeleton infrastructure from task #5.
+/// Note: typedef presence is necessary but not sufficient — a restrictive BPF
+/// security policy or missing `CAP_BPF` can still block attach at load time.
+/// Those failures surface in `record.rs` at `open_skel.load()` / `attach()`.
 #[cfg(feature = "bpf")]
 pub fn probe_tp_btf() -> Result<TracepointMode, ProbeError> {
-    // TODO(probe): Implement minimal tp_btf attach test once skeleton infra lands.
-    // For now, attempt detection via BTF type existence as a proxy:
-    // if /sys/kernel/btf/vmlinux exists and kernel >= 5.5, tp_btf is likely available.
-    // The real test will use an actual attach attempt.
-    Ok(TracepointMode::RawTp)
+    use std::ffi::CString;
+    let name = CString::new("btf_trace_sched_switch").expect("literal has no NUL");
+    if btf_typedef_func_proto_vlen(&name).is_some() {
+        Ok(TracepointMode::TpBtf)
+    } else {
+        Ok(TracepointMode::RawTp)
+    }
 }
 
 /// Stub without `libbpf-rs`. Always returns `RawTp`.
@@ -269,6 +279,126 @@ pub fn probe_tp_btf() -> Result<TracepointMode, ProbeError> {
 #[allow(clippy::unnecessary_wraps)]
 pub fn probe_tp_btf() -> Result<TracepointMode, ProbeError> {
     Ok(TracepointMode::RawTp)
+}
+
+/// Probe whether `block_rq_issue` uses the post-5.11 single-arg form.
+///
+/// Kernel 5.11 commit `a54895fa` dropped the `request_queue *q` from
+/// `block_rq_issue`. The BPF tracepoint ABI flipped accordingly:
+///   - pre-5.11: args = `(__data, q, rq)` — `rq` at `ctx[1]`, vlen=3
+///   - 5.11+   : args = `(__data, rq)`    — `rq` at `ctx[0]`, vlen=2
+///
+/// This probe inspects the `btf_trace_block_rq_issue` `FUNC_PROTO` vlen. When
+/// BTF lacks the typedef (kernel < 5.8, `raw_tp`-only path), falls back to
+/// `uname()` — the `raw_tp` ABI flipped at the same kernel revision.
+#[cfg(feature = "bpf")]
+pub fn probe_block_rq_issue_single_arg() -> Result<bool, ProbeError> {
+    use std::ffi::CString;
+    let name = CString::new("btf_trace_block_rq_issue").expect("literal has no NUL");
+    match btf_typedef_func_proto_vlen(&name) {
+        Some(vlen) => Ok(vlen == 2),
+        None => Ok(kernel_version_ge(5, 11)),
+    }
+}
+
+/// Stub without `libbpf-rs`. Defaults to single-arg form (matches BPF rodata default).
+#[cfg(not(feature = "bpf"))]
+#[allow(clippy::unnecessary_wraps)]
+pub fn probe_block_rq_issue_single_arg() -> Result<bool, ProbeError> {
+    Ok(true)
+}
+
+/// RAII guard for a loaded vmlinux BTF. `btf__free` on drop.
+#[cfg(feature = "bpf")]
+struct BtfGuard(*mut libbpf_sys::btf);
+
+#[cfg(feature = "bpf")]
+impl BtfGuard {
+    fn load_vmlinux() -> Option<Self> {
+        let p = unsafe { libbpf_sys::btf__load_vmlinux_btf() };
+        if p.is_null() {
+            None
+        } else {
+            Some(Self(p))
+        }
+    }
+}
+
+#[cfg(feature = "bpf")]
+impl Drop for BtfGuard {
+    fn drop(&mut self) {
+        unsafe { libbpf_sys::btf__free(self.0) };
+    }
+}
+
+/// Given a typedef name, navigate typedef → ptr → `FUNC_PROTO` and return vlen.
+///
+/// Returns `None` if BTF is unavailable, the typedef is absent, or the type
+/// chain doesn't match the expected `typedef ptr-to-func-proto` shape.
+#[cfg(feature = "bpf")]
+fn btf_typedef_func_proto_vlen(name: &std::ffi::CStr) -> Option<u16> {
+    const BTF_KIND_PTR: u32 = 2;
+    const BTF_KIND_TYPEDEF: u32 = 8;
+    const BTF_KIND_FUNC_PROTO: u32 = 13;
+
+    let btf = BtfGuard::load_vmlinux()?;
+    unsafe {
+        let type_id = libbpf_sys::btf__find_by_name_kind(btf.0, name.as_ptr(), BTF_KIND_TYPEDEF);
+        if type_id < 0 {
+            return None;
+        }
+        #[allow(clippy::cast_sign_loss)]
+        let t1 = libbpf_sys::btf__type_by_id(btf.0, type_id as u32);
+        if t1.is_null() {
+            return None;
+        }
+        let t2 = libbpf_sys::btf__type_by_id(btf.0, (*t1).__bindgen_anon_1.type_);
+        if t2.is_null() || btf_kind((*t2).info) != BTF_KIND_PTR {
+            return None;
+        }
+        let t3 = libbpf_sys::btf__type_by_id(btf.0, (*t2).__bindgen_anon_1.type_);
+        if t3.is_null() || btf_kind((*t3).info) != BTF_KIND_FUNC_PROTO {
+            return None;
+        }
+        Some(btf_vlen((*t3).info))
+    }
+}
+
+#[cfg(feature = "bpf")]
+#[inline]
+const fn btf_kind(info: u32) -> u32 {
+    (info >> 24) & 0x1f
+}
+
+#[cfg(feature = "bpf")]
+#[inline]
+const fn btf_vlen(info: u32) -> u16 {
+    (info & 0xffff) as u16
+}
+
+/// Read kernel release via `uname(2)` and compare against (major, minor).
+///
+/// Returns `true` on probe failure — bias toward the modern form, since a
+/// misread is less harmful than a silently-wrong pre-5.11 attach on a new kernel.
+#[cfg(feature = "bpf")]
+fn kernel_version_ge(major: u32, minor: u32) -> bool {
+    let mut uts: libc::utsname = unsafe { std::mem::zeroed() };
+    if unsafe { libc::uname(&raw mut uts) } != 0 {
+        return true;
+    }
+    let release_ptr = uts.release.as_ptr().cast::<u8>();
+    let release_bytes = unsafe { std::slice::from_raw_parts(release_ptr, uts.release.len()) };
+    let end = release_bytes
+        .iter()
+        .position(|&b| b == 0)
+        .unwrap_or(release_bytes.len());
+    let Ok(release) = std::str::from_utf8(&release_bytes[..end]) else {
+        return true;
+    };
+    let mut parts = release.split(['.', '-']);
+    let maj: u32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let min: u32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    (maj, min) >= (major, minor)
 }
 
 /// Probe whether `fentry` attachment is supported.
@@ -325,6 +455,10 @@ pub fn probe_all(paths: &ProbePaths<'_>) -> Result<FeatureMatrix, ProbeError> {
         eprintln!("probe: fentry probe failed ({e}), assuming unavailable");
         false
     });
+    let block_rq_issue_single_arg = probe_block_rq_issue_single_arg().unwrap_or_else(|e| {
+        eprintln!("probe: block_rq_issue arity probe failed ({e}), assuming single-arg");
+        true
+    });
 
     Ok(FeatureMatrix {
         transport,
@@ -333,6 +467,7 @@ pub fn probe_all(paths: &ProbePaths<'_>) -> Result<FeatureMatrix, ProbeError> {
         has_bpf_loop,
         has_cgroupv2,
         has_fentry,
+        block_rq_issue_single_arg,
     })
 }
 
@@ -510,6 +645,11 @@ mod tests {
         assert!(!probe_fentry().unwrap());
     }
 
+    #[test]
+    fn block_rq_issue_single_arg_stub_returns_true() {
+        assert!(probe_block_rq_issue_single_arg().unwrap());
+    }
+
     // -- Composite: probe_all --
 
     #[test]
@@ -528,6 +668,7 @@ mod tests {
         assert_eq!(matrix.tracepoint, TracepointMode::RawTp);
         assert!(!matrix.has_bpf_loop);
         assert!(!matrix.has_fentry);
+        assert!(matrix.block_rq_issue_single_arg);
     }
 
     #[test]
