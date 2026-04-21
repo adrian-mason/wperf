@@ -1,5 +1,6 @@
 ---
 source: tests/snapshot_tests.rs
+assertion_line: 234
 expression: json
 ---
 cascade:
@@ -25,6 +26,7 @@ stats:
     events_processed: 0
     false_wakeup_filtered_count: 0
     switch_in_without_waker_count: 0
+    unknown_event_type_count: 0
     unmatched_switch_in_count: 0
     unmatched_wakeup_count: 0
   events_read: 0
