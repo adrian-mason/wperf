@@ -148,13 +148,24 @@ impl WaitForGraph {
         for (&tid, &idx) in &self.node_map {
             new.add_node(tid, self.graph[idx].kind);
         }
-        // Clone edges
+        // Clone edges — preserve wait_type across cascade so downstream
+        // consumers (HealthMetrics attributed_delay_ratio, DOT rendering,
+        // SCC annotations) can still inspect per-edge semantics after
+        // redistribution. Attribution is reset by EdgeWeight::new /
+        // with_wait_type (both set attributed_delay_ms = raw_wait_ms).
         for eidx in self.graph.edge_indices() {
             let (src, dst) = self.graph.edge_endpoints(eidx).unwrap();
             let src_tid = self.graph[src].tid;
             let dst_tid = self.graph[dst].tid;
             let weight = &self.graph[eidx];
-            new.add_edge(src_tid, dst_tid, weight.time_window);
+            match weight.wait_type {
+                Some(wt) => {
+                    new.add_edge_with_wait_type(src_tid, dst_tid, weight.time_window, wt);
+                }
+                None => {
+                    new.add_edge(src_tid, dst_tid, weight.time_window);
+                }
+            }
         }
         new
     }
