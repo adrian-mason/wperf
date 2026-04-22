@@ -170,6 +170,24 @@ pub struct CorrelationStats {
     /// the matching Rust variant lands is dropped here rather than panicking.
     /// *Internal diagnostic stat* — not a canonical coverage metric.
     pub unknown_event_type_count: u64,
+
+    // --- Block-IO synthetic edge health (Phase 2b #38 commit-5) -------------
+    // See `HealthMetrics` in src/report.rs for the exported contract.
+    /// `IoComplete` events with no matching `pending_io` entry. Causes:
+    /// BPF dropped the paired `IoIssue` (per-CPU buffer full), the issue
+    /// predates BPF attach, or the userspace key collided.
+    pub io_orphan_complete_count: u64,
+    /// `IoIssue` records still in `pending_io` when correlation ends — no
+    /// matching `IoComplete` arrived before the capture terminated. Upper
+    /// bound on "in-flight I/O at exit"; excessive values suggest capture
+    /// was truncated mid-I/O.
+    pub io_pending_at_end_count: u64,
+    /// `IoIssue` events that overwrote an existing `pending_io` entry with
+    /// the same `(dev, sector, nr_sector)` key. Observability guardrail
+    /// for the collision window Gemini flagged on PR #120 (review id
+    /// 3118320504). If this fires under real workloads, the event ABI
+    /// needs to carry `struct request *` as an opaque `u64`.
+    pub io_userspace_pair_collision_count: u64,
 }
 
 /// Correlate a globally timestamp-sorted event stream into a `WaitForGraph`.
@@ -229,7 +247,7 @@ pub fn correlate_events(
                 handle_futex_wait(event, &mut pending_futex);
             }
             Some(EventType::IoIssue) => {
-                handle_io_issue(event, &mut pending_io);
+                handle_io_issue(event, &mut pending_io, &mut stats);
             }
             Some(EventType::IoComplete) => {
                 handle_io_complete(event, &mut pending_io, &mut graph, &mut stats);
@@ -249,6 +267,11 @@ pub fn correlate_events(
     for (_, pe) in pending_edges.drain() {
         add_edge_from_pending(&mut graph, pe, &mut stats);
     }
+
+    // Pending-at-end: I/Os whose issue arrived but whose completion never
+    // landed before the capture ended. Safe to cast — u64 holds any
+    // plausible in-flight count (max_entries = 16 384 on BPF side).
+    stats.io_pending_at_end_count = pending_io.len() as u64;
 
     (graph, stats)
 }
@@ -373,10 +396,15 @@ fn handle_futex_wait(event: &WperfEvent, pending_futex: &mut HashMap<u32, Pendin
 /// Handle a `block_rq_issue` event — record the in-flight request so the
 /// matching `block_rq_complete` can recover `(submitter, issue_ts)`.
 ///
-/// Orphan / pending-at-end accounting is deferred to commit-5
-/// (`HealthMetrics`).
-fn handle_io_issue(event: &WperfEvent, pending_io: &mut HashMap<IoKey, PendingIo>) {
-    pending_io.insert(
+/// Collisions (same `IoKey` already in the map) are counted and the
+/// pre-existing entry is overwritten (last-writer-wins, matching BPF's
+/// `bpf_map_update_elem(.., BPF_ANY)` semantics).
+fn handle_io_issue(
+    event: &WperfEvent,
+    pending_io: &mut HashMap<IoKey, PendingIo>,
+    stats: &mut CorrelationStats,
+) {
+    let previous = pending_io.insert(
         IoKey::from_event(event),
         PendingIo {
             submitter_tgid: event.pid,
@@ -384,6 +412,9 @@ fn handle_io_issue(event: &WperfEvent, pending_io: &mut HashMap<IoKey, PendingIo
             issue_ts_ns: event.timestamp_ns,
         },
     );
+    if previous.is_some() {
+        stats.io_userspace_pair_collision_count += 1;
+    }
 }
 
 /// Handle a `block_rq_complete` event — drain the matching issue record
@@ -398,8 +429,8 @@ fn handle_io_issue(event: &WperfEvent, pending_io: &mut HashMap<IoKey, PendingIo
 /// with `WaitType::IoBlock`.
 ///
 /// Orphan completions (no matching `pending_io` entry — issue was dropped,
-/// predates attach, or key collided) return without mutating the graph;
-/// orphan counters land in commit-5.
+/// predates attach, or key collided) return without mutating the graph and
+/// are counted into `io_orphan_complete_count`.
 fn handle_io_complete(
     event: &WperfEvent,
     pending_io: &mut HashMap<IoKey, PendingIo>,
@@ -407,6 +438,7 @@ fn handle_io_complete(
     stats: &mut CorrelationStats,
 ) {
     let Some(pending) = pending_io.remove(&IoKey::from_event(event)) else {
+        stats.io_orphan_complete_count += 1;
         return;
     };
 
@@ -1235,11 +1267,13 @@ mod tests {
     #[test]
     fn handle_io_issue_records_submitter_and_ts() {
         let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let mut stats = CorrelationStats::default();
         let ev = io_issue_event(1_000_000, 100, 101, 0x800_0002, 0xDEAD_BEEF_0000_1234);
 
-        handle_io_issue(&ev, &mut pending_io);
+        handle_io_issue(&ev, &mut pending_io, &mut stats);
 
         assert_eq!(pending_io.len(), 1);
+        assert_eq!(stats.io_userspace_pair_collision_count, 0);
         let key = IoKey {
             dev: 0x800_0002,
             sector: 0xDEAD_BEEF_0000_1234,
@@ -1259,7 +1293,7 @@ mod tests {
         let issue = io_issue_event(1_000_000, 100, 101, 0x800_0002, 0x1000);
         let complete = io_complete_event(1_500_000, 100, 101, 0x800_0002, 0x1000);
 
-        handle_io_issue(&issue, &mut pending_io);
+        handle_io_issue(&issue, &mut pending_io, &mut stats);
         handle_io_complete(&complete, &mut pending_io, &mut graph, &mut stats);
 
         assert!(pending_io.is_empty(), "issue/complete pair must drain");
@@ -1279,10 +1313,9 @@ mod tests {
     }
 
     #[test]
-    fn handle_io_complete_without_matching_issue_is_noop() {
+    fn handle_io_complete_without_matching_issue_counts_orphan() {
         // Orphan completion: BPF dropped the issue (per-CPU buffer full),
-        // buffer reorder/truncation, or key collided. Commit-5 adds
-        // io_orphan_complete_count; for now, assert no panic + no edges.
+        // buffer reorder/truncation, or key collided.
         let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
         let mut graph = WaitForGraph::new();
         let mut stats = CorrelationStats::default();
@@ -1293,6 +1326,7 @@ mod tests {
         assert!(pending_io.is_empty());
         assert_eq!(stats.edges_created, 0);
         assert_eq!(graph.node_count(), 0);
+        assert_eq!(stats.io_orphan_complete_count, 1, "orphan must be counted");
     }
 
     #[test]
@@ -1300,18 +1334,19 @@ mod tests {
         // Two devices, same sector — must NOT collide. `dev` is the first
         // disambiguator in the IoKey tuple.
         let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let mut stats = CorrelationStats::default();
         let issue_dev1 = io_issue_event(1_000_000, 100, 101, 0x800_0001, 0x2000);
         let issue_dev2 = io_issue_event(1_000_001, 200, 201, 0x800_0002, 0x2000);
 
-        handle_io_issue(&issue_dev1, &mut pending_io);
-        handle_io_issue(&issue_dev2, &mut pending_io);
+        handle_io_issue(&issue_dev1, &mut pending_io, &mut stats);
+        handle_io_issue(&issue_dev2, &mut pending_io, &mut stats);
 
         assert_eq!(pending_io.len(), 2);
+        assert_eq!(stats.io_userspace_pair_collision_count, 0);
 
         // Completing dev1's IO must not touch dev2's entry.
         let complete_dev1 = io_complete_event(1_500_000, 100, 101, 0x800_0001, 0x2000);
         let mut graph = WaitForGraph::new();
-        let mut stats = CorrelationStats::default();
         handle_io_complete(&complete_dev1, &mut pending_io, &mut graph, &mut stats);
 
         assert_eq!(pending_io.len(), 1);
@@ -1330,18 +1365,19 @@ mod tests {
         // targeting the same starting sector would collide. Including
         // `nr_sector` in IoKey must let them pair independently.
         let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let mut stats = CorrelationStats::default();
         let small = io_issue_event_sized(1_000_000, 100, 101, 0x800_0001, 0x2000, 1);
         let large = io_issue_event_sized(1_000_001, 200, 201, 0x800_0001, 0x2000, 16);
 
-        handle_io_issue(&small, &mut pending_io);
-        handle_io_issue(&large, &mut pending_io);
+        handle_io_issue(&small, &mut pending_io, &mut stats);
+        handle_io_issue(&large, &mut pending_io, &mut stats);
 
         assert_eq!(pending_io.len(), 2, "different nr_sector must not collide");
+        assert_eq!(stats.io_userspace_pair_collision_count, 0);
 
         // Completing the large request must not disturb the small one.
         let complete_large = io_complete_event_sized(1_500_000, 200, 201, 0x800_0001, 0x2000, 16);
         let mut graph = WaitForGraph::new();
-        let mut stats = CorrelationStats::default();
         handle_io_complete(&complete_large, &mut pending_io, &mut graph, &mut stats);
 
         assert_eq!(pending_io.len(), 1);
@@ -1360,16 +1396,16 @@ mod tests {
         // Typical case: one tgid submits multiple IOs in flight concurrently
         // to the same device. Each (dev, sector) is independent.
         let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let mut stats = CorrelationStats::default();
         for sector in [0x1000u64, 0x2000, 0x3000, 0x4000] {
             let ev = io_issue_event(1_000_000 + sector, 100, 101, 0x800_0001, sector);
-            handle_io_issue(&ev, &mut pending_io);
+            handle_io_issue(&ev, &mut pending_io, &mut stats);
         }
 
         assert_eq!(pending_io.len(), 4);
 
         // Out-of-order completions (NVMe queue reorder is realistic).
         let mut graph = WaitForGraph::new();
-        let mut stats = CorrelationStats::default();
         for sector in [0x3000u64, 0x1000, 0x4000, 0x2000] {
             let ev = io_complete_event(2_000_000 + sector, 100, 101, 0x800_0001, sector);
             handle_io_complete(&ev, &mut pending_io, &mut graph, &mut stats);
@@ -1377,6 +1413,7 @@ mod tests {
 
         assert!(pending_io.is_empty());
         assert_eq!(stats.edges_created, 8, "4 I/Os × 2 edges = 8");
+        assert_eq!(stats.io_orphan_complete_count, 0);
     }
 
     #[test]
@@ -1387,13 +1424,18 @@ mod tests {
         // matches BPF-side `bpf_map_update_elem(.., BPF_ANY)` semantics
         // (wperf.bpf.c handle_block_rq_issue).
         let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let mut stats = CorrelationStats::default();
         let first = io_issue_event(1_000_000, 100, 101, 0x800_0001, 0x1000);
         let second = io_issue_event(2_000_000, 200, 201, 0x800_0001, 0x1000);
 
-        handle_io_issue(&first, &mut pending_io);
-        handle_io_issue(&second, &mut pending_io);
+        handle_io_issue(&first, &mut pending_io, &mut stats);
+        handle_io_issue(&second, &mut pending_io, &mut stats);
 
         assert_eq!(pending_io.len(), 1);
+        assert_eq!(
+            stats.io_userspace_pair_collision_count, 1,
+            "second issue with same IoKey must be counted as collision"
+        );
         let key = IoKey {
             dev: 0x800_0001,
             sector: 0x1000,
@@ -1422,6 +1464,11 @@ mod tests {
         assert_eq!(stats.edges_created, 2);
         assert_eq!(stats.unknown_event_type_count, 0);
         assert_eq!(stats.events_processed, 3);
+        assert_eq!(
+            stats.io_pending_at_end_count, 1,
+            "T201's unpaired issue must count as pending-at-end"
+        );
+        assert_eq!(stats.io_orphan_complete_count, 0);
     }
 
     #[test]

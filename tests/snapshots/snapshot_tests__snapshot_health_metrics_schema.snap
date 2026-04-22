@@ -2,9 +2,13 @@
 source: tests/snapshot_tests.rs
 expression: health_json
 ---
+attributed_delay_ratio: ~
 cascade_depth_truncation_count: ~
 drop_count: 7
 false_wakeup_filtered_count: 0
 invariants_ok: true
+io_orphan_complete_count: 0
+io_pending_at_end_count: 0
+io_userspace_pair_collision_count: 0
 partial_stack_count: ~
 unmatched_wakeup_count: 0

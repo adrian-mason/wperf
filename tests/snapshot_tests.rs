@@ -258,7 +258,8 @@ fn snapshot_unmatched_wakeup_report() {
 
 #[test]
 fn snapshot_health_metrics_schema() {
-    // Verifies all 6 health fields: 3 actual + 3 null (unavailable in Phase 1).
+    // Verifies all 10 health fields: core set + 4 block-IO fields added in
+    // Phase 2b #38 commit-5. Phase 1 + #38 unavailable fields stay null.
     let events = vec![
         switch_event(1_000_000, 101, 202),
         wakeup_event(2_000_000, 201, 101),

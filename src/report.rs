@@ -124,6 +124,26 @@ pub struct HealthMetrics {
     pub cascade_depth_truncation_count: Option<u64>,
     /// Wakeup edges pruned by the spurious wakeup filter (§2.5).
     pub false_wakeup_filtered_count: Option<u64>,
+
+    // --- Block-IO attribution health (Phase 2b #38 commit-5) ---------------
+    /// `IoComplete` events with no matching `IoIssue` in the userspace
+    /// `pending_io` map. Populated if block-IO tracing ran, else `None`.
+    pub io_orphan_complete_count: Option<u64>,
+    /// `IoIssue` records still pending when correlation ended (no matching
+    /// `IoComplete` arrived before capture stopped). Populated if block-IO
+    /// tracing ran, else `None`.
+    pub io_pending_at_end_count: Option<u64>,
+    /// `IoIssue` events that overwrote an existing `pending_io` entry due
+    /// to a `(dev, sector, nr_sector)` key collision. Guardrail for the
+    /// collision window Gemini flagged on PR #120 — if this fires under
+    /// real workloads, the event ABI needs to carry `struct request *`.
+    pub io_userspace_pair_collision_count: Option<u64>,
+    /// Fraction of block-IO raw wait time that flowed through the cascade
+    /// to become attributed delay on `WaitType::IoBlock` edges. Phase 2b
+    /// gate: `≥ 0.70` (final-design.md §3.8). `None` when no `IoBlock`
+    /// edges exist (tracing disabled or no I/O observed) or when total
+    /// `raw_wait` is zero (all sub-ms I/Os — ratio is undefined).
+    pub attributed_delay_ratio: Option<f64>,
 }
 
 /// CLI entry point: opens the file, runs the pipeline, writes output to stdout.
@@ -194,6 +214,12 @@ pub fn build_report<R: Read + Seek>(
     let unmatched_wakeup_count = stats.correlation.unmatched_wakeup_count;
     let false_wakeup_filtered_count = stats.correlation.false_wakeup_filtered_count;
 
+    let io_orphan_complete_count = Some(stats.correlation.io_orphan_complete_count);
+    let io_pending_at_end_count = Some(stats.correlation.io_pending_at_end_count);
+    let io_userspace_pair_collision_count =
+        Some(stats.correlation.io_userspace_pair_collision_count);
+    let attributed_delay_ratio = compute_io_attributed_delay_ratio(&cascaded);
+
     Ok(ReportOutput {
         cascade,
         critical_path,
@@ -206,8 +232,43 @@ pub fn build_report<R: Read + Seek>(
             partial_stack_count: None,
             cascade_depth_truncation_count: None,
             false_wakeup_filtered_count: Some(false_wakeup_filtered_count),
+            io_orphan_complete_count,
+            io_pending_at_end_count,
+            io_userspace_pair_collision_count,
+            attributed_delay_ratio,
         },
     })
+}
+
+/// Compute `sum(attributed_delay) / sum(raw_wait)` across all `IoBlock`-typed
+/// edges in the cascaded graph. Returns `None` when no `IoBlock` edges exist
+/// (block-IO tracing disabled or no I/O observed) or when total `raw_wait`
+/// sums to zero (all sub-millisecond I/Os — ratio undefined).
+///
+/// Phase 2b gate (final-design.md §3.8): `≥ 0.70`.
+fn compute_io_attributed_delay_ratio(cascaded: &crate::graph::wfg::WaitForGraph) -> Option<f64> {
+    use crate::graph::types::WaitType;
+
+    let mut raw_sum: u64 = 0;
+    let mut attributed_sum: u64 = 0;
+    let mut saw_io_edge = false;
+
+    for (_, _, _, weight) in cascaded.all_edges() {
+        if weight.wait_type == Some(WaitType::IoBlock) {
+            saw_io_edge = true;
+            raw_sum += weight.raw_wait_ms;
+            attributed_sum += weight.attributed_delay_ms;
+        }
+    }
+
+    if !saw_io_edge || raw_sum == 0 {
+        return None;
+    }
+
+    // Cast via `as` is safe: u64→f64 loses precision past 2^53 but for
+    // millisecond wait sums in a single capture this is comfortable.
+    #[allow(clippy::cast_precision_loss)]
+    Some(attributed_sum as f64 / raw_sum as f64)
 }
 
 #[cfg(test)]
@@ -259,6 +320,73 @@ mod tests {
             prev_state: 0,
             flags: 0,
         }
+    }
+
+    #[test]
+    fn attributed_delay_ratio_none_when_no_io_edges() {
+        // Non-IO graph: ratio should be None (not measured).
+        use crate::graph::types::{NodeKind, TimeWindow};
+        use crate::graph::wfg::WaitForGraph;
+
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(100), NodeKind::UserThread);
+        g.add_node(ThreadId(200), NodeKind::UserThread);
+        g.add_edge(ThreadId(100), ThreadId(200), TimeWindow::new(0, 100));
+
+        assert_eq!(compute_io_attributed_delay_ratio(&g), None);
+    }
+
+    #[test]
+    fn attributed_delay_ratio_some_on_io_edges() {
+        // IoBlock edges contribute to the ratio; other edges are ignored.
+        use crate::graph::types::{DISK_TID, NodeKind, TimeWindow, WaitType};
+        use crate::graph::wfg::WaitForGraph;
+
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(100), NodeKind::UserThread);
+        g.add_node(ThreadId(DISK_TID), NodeKind::PseudoDisk);
+        // User→Disk (IoBlock), raw=10
+        g.add_edge_with_wait_type(
+            ThreadId(100),
+            ThreadId(DISK_TID),
+            TimeWindow::new(0, 10),
+            WaitType::IoBlock,
+        );
+        // Disk→User (IoBlock), raw=10
+        g.add_edge_with_wait_type(
+            ThreadId(DISK_TID),
+            ThreadId(100),
+            TimeWindow::new(0, 10),
+            WaitType::IoBlock,
+        );
+
+        // EdgeWeight::new sets raw_wait_ms = attributed_delay_ms = duration,
+        // so the ratio pre-cascade equals 1.0.
+        let ratio = compute_io_attributed_delay_ratio(&g).expect("IO edges present");
+        assert!(
+            (ratio - 1.0).abs() < 1e-9,
+            "expected ratio=1.0, got {ratio}"
+        );
+    }
+
+    #[test]
+    fn attributed_delay_ratio_none_when_all_io_edges_zero_duration() {
+        // Sub-ms I/Os collapse to zero-duration windows. Ratio is undefined
+        // when the raw denominator sums to zero — must return None, not NaN.
+        use crate::graph::types::{DISK_TID, NodeKind, TimeWindow, WaitType};
+        use crate::graph::wfg::WaitForGraph;
+
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(100), NodeKind::UserThread);
+        g.add_node(ThreadId(DISK_TID), NodeKind::PseudoDisk);
+        g.add_edge_with_wait_type(
+            ThreadId(100),
+            ThreadId(DISK_TID),
+            TimeWindow::new(5, 5),
+            WaitType::IoBlock,
+        );
+
+        assert_eq!(compute_io_attributed_delay_ratio(&g), None);
     }
 
     #[test]
