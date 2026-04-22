@@ -92,14 +92,26 @@ struct PendingEdge {
 ///
 /// BPF already pairs issue/complete kernel-side via `struct request *`, but
 /// that pointer is not propagated to userspace (ABI-unstable, and emitting
-/// it would add 8 bytes to every IO event). Userspace re-pairs using the
-/// stable tuple `(dev, sector)` carried on both `IoIssue` and `IoComplete`
-/// events. `dev` alone is insufficient — many concurrent requests target
-/// the same device — and `sector` alone collides across devices.
+/// it would add 8 bytes to every IO event — requires an event-layout
+/// version bump which is out of scope for #38). Userspace re-pairs using
+/// the tuple `(dev, sector, nr_sector)` carried on both `IoIssue` and
+/// `IoComplete` events.
+///
+/// **Collision surface** (Gemini review, PR #120): `(dev, sector)` alone is
+/// not globally unique for in-flight requests — two concurrent reads or a
+/// read+write targeting the same start sector would collide and misattribute
+/// on completion. Adding `nr_sector` narrows the window substantially (same
+/// dev + same start sector + same size is rare in practice — block layer
+/// serializes writes at the same LBA, and merged/split requests change
+/// `nr_sector`). The residual risk is observed in commit-5 via an
+/// `io_userspace_pair_collision_count` counter; if it fires in real
+/// workloads we bump the event ABI to carry `struct request *` as an opaque
+/// `u64` ID (Gemini's preferred long-term fix).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct IoKey {
     dev: u32,
     sector: u64,
+    nr_sector: u32,
 }
 
 impl IoKey {
@@ -107,6 +119,7 @@ impl IoKey {
         Self {
             dev: event.io_dev(),
             sector: event.io_sector(),
+            nr_sector: event.io_nr_sector(),
         }
     }
 }
@@ -1136,8 +1149,16 @@ mod tests {
     // in-scope is `pending_io`, which lives inside `correlate_events` and is
     // not exposed to callers.
 
-    #[allow(clippy::similar_names)] // tgid / tid mirror WperfEvent field names
-    fn io_issue_event(ts: u64, tgid: u32, tid: u32, dev: u32, sector: u64) -> WperfEvent {
+    // tgid / tid mirror WperfEvent field names — clippy false positive
+    #[allow(clippy::similar_names)]
+    fn io_issue_event_sized(
+        ts: u64,
+        tgid: u32,
+        tid: u32,
+        dev: u32,
+        sector: u64,
+        nr_sector: u32,
+    ) -> WperfEvent {
         WperfEvent {
             timestamp_ns: ts,
             pid: tgid,
@@ -1147,8 +1168,8 @@ mod tests {
             next_tid: u32::try_from(sector >> 32).unwrap(),
             // io_dev() reads prev_pid
             prev_pid: dev,
-            // io_nr_sector() reads next_pid — observability-only in Phase 2b
-            next_pid: 8,
+            // io_nr_sector() reads next_pid
+            next_pid: nr_sector,
             cpu: 0,
             event_type: EventType::IoIssue as u8,
             prev_state: 0,
@@ -1157,12 +1178,28 @@ mod tests {
     }
 
     #[allow(clippy::similar_names)]
-    fn io_complete_event(ts: u64, tgid: u32, tid: u32, dev: u32, sector: u64) -> WperfEvent {
+    fn io_issue_event(ts: u64, tgid: u32, tid: u32, dev: u32, sector: u64) -> WperfEvent {
+        io_issue_event_sized(ts, tgid, tid, dev, sector, 8)
+    }
+
+    #[allow(clippy::similar_names)]
+    fn io_complete_event_sized(
+        ts: u64,
+        tgid: u32,
+        tid: u32,
+        dev: u32,
+        sector: u64,
+        nr_sector: u32,
+    ) -> WperfEvent {
         WperfEvent {
             event_type: EventType::IoComplete as u8,
-            timestamp_ns: ts,
-            ..io_issue_event(ts, tgid, tid, dev, sector)
+            ..io_issue_event_sized(ts, tgid, tid, dev, sector, nr_sector)
         }
+    }
+
+    #[allow(clippy::similar_names)]
+    fn io_complete_event(ts: u64, tgid: u32, tid: u32, dev: u32, sector: u64) -> WperfEvent {
+        io_complete_event_sized(ts, tgid, tid, dev, sector, 8)
     }
 
     #[test]
@@ -1176,6 +1213,7 @@ mod tests {
         let key = IoKey {
             dev: 0x800_0002,
             sector: 0xDEAD_BEEF_0000_1234,
+            nr_sector: 8,
         };
         let rec = pending_io.get(&key).expect("IoKey must match");
         assert_eq!(rec.submitter_tgid, 100);
@@ -1209,9 +1247,9 @@ mod tests {
     }
 
     #[test]
-    fn pending_io_keyed_by_dev_and_sector_not_just_sector() {
-        // Two devices, same sector — must NOT collide. Disambiguation by
-        // (dev, sector) is the whole reason IoKey exists.
+    fn pending_io_keyed_by_dev_sector_nr_sector() {
+        // Two devices, same sector — must NOT collide. `dev` is the first
+        // disambiguator in the IoKey tuple.
         let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
         let issue_dev1 = io_issue_event(1_000_000, 100, 101, 0x800_0001, 0x2000);
         let issue_dev2 = io_issue_event(1_000_001, 200, 201, 0x800_0002, 0x2000);
@@ -1229,8 +1267,39 @@ mod tests {
         let dev2_key = IoKey {
             dev: 0x800_0002,
             sector: 0x2000,
+            nr_sector: 8,
         };
         assert!(pending_io.contains_key(&dev2_key));
+    }
+
+    #[test]
+    fn pending_io_same_dev_same_sector_different_size_no_collision() {
+        // Gemini PR #120 review: `(dev, sector)` alone is not globally unique
+        // for in-flight requests — two concurrent reads or a read+write
+        // targeting the same starting sector would collide. Including
+        // `nr_sector` in IoKey must let them pair independently.
+        let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let small = io_issue_event_sized(1_000_000, 100, 101, 0x800_0001, 0x2000, 1);
+        let large = io_issue_event_sized(1_000_001, 200, 201, 0x800_0001, 0x2000, 16);
+
+        handle_io_issue(&small, &mut pending_io);
+        handle_io_issue(&large, &mut pending_io);
+
+        assert_eq!(pending_io.len(), 2, "different nr_sector must not collide");
+
+        // Completing the large request must not disturb the small one.
+        let complete_large = io_complete_event_sized(1_500_000, 200, 201, 0x800_0001, 0x2000, 16);
+        handle_io_complete(&complete_large, &mut pending_io);
+
+        assert_eq!(pending_io.len(), 1);
+        let small_key = IoKey {
+            dev: 0x800_0001,
+            sector: 0x2000,
+            nr_sector: 1,
+        };
+        let rec = pending_io[&small_key];
+        assert_eq!(rec.submitter_tgid, 100);
+        assert_eq!(rec.submitter_tid, 101);
     }
 
     #[test]
@@ -1272,6 +1341,7 @@ mod tests {
         let key = IoKey {
             dev: 0x800_0001,
             sector: 0x1000,
+            nr_sector: 8,
         };
         let rec = pending_io[&key];
         assert_eq!(rec.submitter_tgid, 200);

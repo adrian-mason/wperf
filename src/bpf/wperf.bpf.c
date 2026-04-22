@@ -322,12 +322,27 @@ int handle_sys_enter_futex(struct trace_event_raw_sys_enter *ctx)
 #define PF_KTHREAD 0x00200000
 #endif
 
+/* Per-CPU counters exposed via the io_counters map. Userspace reads these
+ * for HealthMetrics (#38 commit-5) and observability.
+ *
+ *   KTHREAD_SKIP          — issue from a kernel thread (filtered, not an error)
+ *   PENDING_DROP          — pending_io map insert failed (map full → forward
+ *                           progress lost, will orphan the matching complete)
+ *   ORPHAN_COMPLETE       — complete with no matching pending_io entry
+ *                           (issue was dropped or predates attach)
+ *   COMPLETION_LOCALITY   — completion ran OUTSIDE the submitter's task context
+ *     (renamed from `SUBMITTER_MISS` per Gemini PR #120 review: the original
+ *     name read as "error", but under async I/O this fires on nearly every
+ *     completion because completions run in softirq/IRQ context — not the
+ *     submitter's task. It's a locality metric, not an error signal.
+ *     High fraction = mostly-async workload; low fraction = mostly-sync.)
+ */
 enum wperf_io_counter {
-	IO_CNT_KTHREAD_SKIP     = 0,
-	IO_CNT_PENDING_DROP     = 1,
-	IO_CNT_ORPHAN_COMPLETE  = 2,
-	IO_CNT_SUBMITTER_MISS   = 3,
-	IO_CNT_MAX              = 4,
+	IO_CNT_KTHREAD_SKIP        = 0,
+	IO_CNT_PENDING_DROP        = 1,
+	IO_CNT_ORPHAN_COMPLETE     = 2,
+	IO_CNT_COMPLETION_LOCALITY = 3,
+	IO_CNT_MAX                 = 4,
 };
 
 struct {
@@ -434,9 +449,12 @@ static __always_inline int handle_block_rq_complete(void *ctx, struct request *r
 		return 0;
 	}
 
+	/* Locality metric — for async I/O this fires ~always (completion runs
+	 * in softirq/IRQ, not the submitter's task); for sync/polled I/O it
+	 * rarely fires. Not an error signal. See enum wperf_io_counter docs. */
 	__u64 cur_pid_tgid = bpf_get_current_pid_tgid();
 	if ((__u32)cur_pid_tgid != val->submitter_tid)
-		io_counter_inc(IO_CNT_SUBMITTER_MISS);
+		io_counter_inc(IO_CNT_COMPLETION_LOCALITY);
 
 	struct wperf_event *e = reserve_buf(sizeof(*e));
 	if (!e) {
