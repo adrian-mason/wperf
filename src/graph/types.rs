@@ -79,6 +79,10 @@ pub enum WaitType {
     FutexLockPi,
     FutexWaitBitset,
     FutexWaitRequeuePi,
+    /// Block-IO synthetic edge (User↔PseudoDisk, both directions share this
+    /// annotation — ADR-009 §Consequences). Edge weight = I/O service time
+    /// (`block_rq_complete_ts - block_rq_issue_ts`).
+    IoBlock,
 }
 
 /// Edge metadata in the Wait-For Graph.

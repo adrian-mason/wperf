@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use serde::Serialize;
 
 use crate::format::event::{EventType, WperfEvent, futex_op};
-use crate::graph::types::{NodeKind, ThreadId, TimeWindow, WaitType};
+use crate::graph::types::{DISK_TID, NodeKind, ThreadId, TimeWindow, WaitType};
 use crate::graph::wfg::WaitForGraph;
 
 /// Linux `TASK_RUNNING` state value. A `sched_switch` with `prev_state == 0`
@@ -232,7 +232,7 @@ pub fn correlate_events(
                 handle_io_issue(event, &mut pending_io);
             }
             Some(EventType::IoComplete) => {
-                handle_io_complete(event, &mut pending_io);
+                handle_io_complete(event, &mut pending_io, &mut graph, &mut stats);
             }
             None => {
                 if stats.unknown_event_type_count == 0 {
@@ -373,10 +373,8 @@ fn handle_futex_wait(event: &WperfEvent, pending_futex: &mut HashMap<u32, Pendin
 /// Handle a `block_rq_issue` event — record the in-flight request so the
 /// matching `block_rq_complete` can recover `(submitter, issue_ts)`.
 ///
-/// Synthetic edge generation against the `block_device:<dev>` pseudo-thread
-/// lands in a later commit (issue #38 commit-4); this commit tracks only the
-/// userspace lifecycle. Orphan / pending-at-end accounting is deferred to
-/// commit-5 (`HealthMetrics`).
+/// Orphan / pending-at-end accounting is deferred to commit-5
+/// (`HealthMetrics`).
 fn handle_io_issue(event: &WperfEvent, pending_io: &mut HashMap<IoKey, PendingIo>) {
     pending_io.insert(
         IoKey::from_event(event),
@@ -388,14 +386,46 @@ fn handle_io_issue(event: &WperfEvent, pending_io: &mut HashMap<IoKey, PendingIo
     );
 }
 
-/// Handle a `block_rq_complete` event — drain the matching issue record.
+/// Handle a `block_rq_complete` event — drain the matching issue record
+/// and emit the bidirectional User↔PseudoDisk synthetic edge pair.
 ///
-/// BPF re-stamps the original submitter onto the completion event (ADR-009
-/// §3), so the `pid`/`tid` carried here are trustworthy for attribution; the
-/// only job of userspace is to pair with the issue and surface the (delta,
-/// submitter) tuple to commit-4's edge generator.
-fn handle_io_complete(event: &WperfEvent, pending_io: &mut HashMap<IoKey, PendingIo>) {
-    pending_io.remove(&IoKey::from_event(event));
+/// Per ADR-009 §Consequences, Phase 2b uses a single `DISK_TID` pseudo-thread
+/// for all block I/O — per-device pseudo-disks (`block_device:<dev>`) are
+/// deferred to a future issue. The paper's two-edge construction (User→Disk
+/// for initiation, Disk→User for completion) produces a 2-cycle SCC so that
+/// Tarjan analysis can identify I/O-bound Knots; both edges share the same
+/// time window (`issue_ts` → `complete_ts` = service time) and are annotated
+/// with `WaitType::IoBlock`.
+///
+/// Orphan completions (no matching `pending_io` entry — issue was dropped,
+/// predates attach, or key collided) return without mutating the graph;
+/// orphan counters land in commit-5.
+fn handle_io_complete(
+    event: &WperfEvent,
+    pending_io: &mut HashMap<IoKey, PendingIo>,
+    graph: &mut WaitForGraph,
+    stats: &mut CorrelationStats,
+) {
+    let Some(pending) = pending_io.remove(&IoKey::from_event(event)) else {
+        return;
+    };
+
+    // ns → ms truncation — sub-millisecond I/Os (common on NVMe) collapse to
+    // zero-duration windows. This preserves the edge for SCC participation
+    // without introducing floating-point; cascade handles duration==0 windows
+    // correctly (raw_wait = attributed_delay = 0 satisfies I-2 / I-7).
+    let issue_ms = pending.issue_ts_ns / 1_000_000;
+    let complete_ms = event.timestamp_ns / 1_000_000;
+    let window = TimeWindow::new(issue_ms, complete_ms.max(issue_ms));
+
+    let user = ThreadId(i64::from(pending.submitter_tid));
+    let disk = ThreadId(DISK_TID);
+
+    graph.add_node(user, NodeKind::UserThread);
+    graph.add_node(disk, NodeKind::PseudoDisk);
+    graph.add_edge_with_wait_type(user, disk, window, WaitType::IoBlock);
+    graph.add_edge_with_wait_type(disk, user, window, WaitType::IoBlock);
+    stats.edges_created += 2;
 }
 
 /// Handle a `sched_wakeup` or `sched_wakeup_new` event.
@@ -521,10 +551,10 @@ mod tests {
     }
 
     #[test]
-    fn io_discriminants_dispatch_without_graph_mutation() {
-        // commit-3 scaffold: IoIssue / IoComplete dispatch into pending_io
-        // lifecycle handlers but must NOT count as unknown and must NOT
-        // mutate the graph — synth-edge generation lands in commit-4.
+    fn io_discriminants_known_and_emit_synthetic_edge_pair() {
+        // commit-4: a paired IoIssue + IoComplete emits the bidirectional
+        // User↔Disk synthetic edge pair. Discriminants must NOT count as
+        // unknown, and the pair must be annotated with WaitType::IoBlock.
         let io_issue = WperfEvent {
             timestamp_ns: 1_000_000,
             pid: 100,
@@ -544,8 +574,8 @@ mod tests {
             ..io_issue
         };
         let (graph, stats) = correlate(&[io_issue, io_complete]);
-        assert_eq!(graph.node_count(), 0);
-        assert_eq!(stats.edges_created, 0);
+        assert_eq!(graph.node_count(), 2, "user + DISK pseudo-thread");
+        assert_eq!(stats.edges_created, 2, "bidirectional synthetic pair");
         assert_eq!(stats.unknown_event_type_count, 0);
         assert_eq!(stats.events_processed, 2);
     }
@@ -1222,28 +1252,47 @@ mod tests {
     }
 
     #[test]
-    fn handle_io_complete_drains_matching_issue() {
+    fn handle_io_complete_drains_matching_issue_and_emits_edges() {
         let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let mut graph = WaitForGraph::new();
+        let mut stats = CorrelationStats::default();
         let issue = io_issue_event(1_000_000, 100, 101, 0x800_0002, 0x1000);
         let complete = io_complete_event(1_500_000, 100, 101, 0x800_0002, 0x1000);
 
         handle_io_issue(&issue, &mut pending_io);
-        handle_io_complete(&complete, &mut pending_io);
+        handle_io_complete(&complete, &mut pending_io, &mut graph, &mut stats);
 
         assert!(pending_io.is_empty(), "issue/complete pair must drain");
+        assert_eq!(stats.edges_created, 2, "bidirectional pair = 2 edges");
+        assert_eq!(graph.node_count(), 2, "user + DISK pseudo-thread");
+
+        // Both directions present with WaitType::IoBlock.
+        let edges = graph.all_edges();
+        let user = ThreadId(101);
+        let disk = ThreadId(DISK_TID);
+        assert!(edges.iter().any(|(_, s, d, w)| *s == user
+            && *d == disk
+            && w.wait_type == Some(WaitType::IoBlock)));
+        assert!(edges.iter().any(|(_, s, d, w)| *s == disk
+            && *d == user
+            && w.wait_type == Some(WaitType::IoBlock)));
     }
 
     #[test]
     fn handle_io_complete_without_matching_issue_is_noop() {
-        // Orphan completion: BPF dropped the issue (per-CPU buffer full) or
-        // buffer reorder/truncation. Commit-5 adds io_orphan_complete_count;
-        // for now, assert no panic and no insertion.
+        // Orphan completion: BPF dropped the issue (per-CPU buffer full),
+        // buffer reorder/truncation, or key collided. Commit-5 adds
+        // io_orphan_complete_count; for now, assert no panic + no edges.
         let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let mut graph = WaitForGraph::new();
+        let mut stats = CorrelationStats::default();
         let complete = io_complete_event(1_500_000, 100, 101, 0x800_0002, 0x1000);
 
-        handle_io_complete(&complete, &mut pending_io);
+        handle_io_complete(&complete, &mut pending_io, &mut graph, &mut stats);
 
         assert!(pending_io.is_empty());
+        assert_eq!(stats.edges_created, 0);
+        assert_eq!(graph.node_count(), 0);
     }
 
     #[test]
@@ -1261,7 +1310,9 @@ mod tests {
 
         // Completing dev1's IO must not touch dev2's entry.
         let complete_dev1 = io_complete_event(1_500_000, 100, 101, 0x800_0001, 0x2000);
-        handle_io_complete(&complete_dev1, &mut pending_io);
+        let mut graph = WaitForGraph::new();
+        let mut stats = CorrelationStats::default();
+        handle_io_complete(&complete_dev1, &mut pending_io, &mut graph, &mut stats);
 
         assert_eq!(pending_io.len(), 1);
         let dev2_key = IoKey {
@@ -1289,7 +1340,9 @@ mod tests {
 
         // Completing the large request must not disturb the small one.
         let complete_large = io_complete_event_sized(1_500_000, 200, 201, 0x800_0001, 0x2000, 16);
-        handle_io_complete(&complete_large, &mut pending_io);
+        let mut graph = WaitForGraph::new();
+        let mut stats = CorrelationStats::default();
+        handle_io_complete(&complete_large, &mut pending_io, &mut graph, &mut stats);
 
         assert_eq!(pending_io.len(), 1);
         let small_key = IoKey {
@@ -1315,12 +1368,15 @@ mod tests {
         assert_eq!(pending_io.len(), 4);
 
         // Out-of-order completions (NVMe queue reorder is realistic).
+        let mut graph = WaitForGraph::new();
+        let mut stats = CorrelationStats::default();
         for sector in [0x3000u64, 0x1000, 0x4000, 0x2000] {
             let ev = io_complete_event(2_000_000 + sector, 100, 101, 0x800_0001, sector);
-            handle_io_complete(&ev, &mut pending_io);
+            handle_io_complete(&ev, &mut pending_io, &mut graph, &mut stats);
         }
 
         assert!(pending_io.is_empty());
+        assert_eq!(stats.edges_created, 8, "4 I/Os × 2 edges = 8");
     }
 
     #[test]
@@ -1350,9 +1406,9 @@ mod tests {
     }
 
     #[test]
-    fn io_stream_through_correlate_events_does_not_panic() {
-        // End-to-end: IoIssue / IoComplete events flow through correlate()
-        // without touching unknown counters, edges, or other stats.
+    fn io_stream_through_correlate_events_creates_edge_per_pair() {
+        // End-to-end: one completed I/O pair emits 2 edges (User↔Disk), a
+        // dangling issue (pending-at-end) emits nothing.
         let events = vec![
             io_issue_event(1_000_000, 100, 101, 0x800_0001, 0x1000),
             io_complete_event(1_500_000, 100, 101, 0x800_0001, 0x1000),
@@ -1362,9 +1418,49 @@ mod tests {
 
         let (graph, stats) = correlate(&events);
 
-        assert_eq!(graph.node_count(), 0);
-        assert_eq!(stats.edges_created, 0);
+        assert_eq!(graph.node_count(), 2, "T101 + DISK (T201 never landed)");
+        assert_eq!(stats.edges_created, 2);
         assert_eq!(stats.unknown_event_type_count, 0);
         assert_eq!(stats.events_processed, 3);
+    }
+
+    #[test]
+    fn io_edges_form_scc_for_tarjan() {
+        // Sanity: the bidirectional pair must form a 2-cycle (User→Disk→User)
+        // so Tarjan SCC analysis can identify I/O-bound Knots per ADR-009.
+        // A non-cycling single edge would route I/O threads into a Sink
+        // Collector and miss the Knot classification.
+        let events = vec![
+            io_issue_event(1_000_000, 100, 101, 0x800_0001, 0x1000),
+            io_complete_event(1_500_000, 100, 101, 0x800_0001, 0x1000),
+        ];
+        let (graph, _) = correlate(&events);
+        let user = ThreadId(101);
+        let disk = ThreadId(DISK_TID);
+        let edges = graph.all_edges();
+
+        let forward = edges
+            .iter()
+            .any(|(_, s, d, w)| *s == user && *d == disk && w.wait_type == Some(WaitType::IoBlock));
+        let back = edges
+            .iter()
+            .any(|(_, s, d, w)| *s == disk && *d == user && w.wait_type == Some(WaitType::IoBlock));
+        assert!(
+            forward && back,
+            "must have both directions for SCC formation"
+        );
+
+        // Windows must match: service time is shared across both directions.
+        let forward_weight = edges
+            .iter()
+            .find(|(_, s, d, _)| *s == user && *d == disk)
+            .map(|(_, _, _, w)| w.time_window)
+            .unwrap();
+        let back_weight = edges
+            .iter()
+            .find(|(_, s, d, _)| *s == disk && *d == user)
+            .map(|(_, _, _, w)| w.time_window)
+            .unwrap();
+        assert_eq!(forward_weight, back_weight);
     }
 }
