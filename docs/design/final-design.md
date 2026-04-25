@@ -232,7 +232,7 @@ For I/O and softirq delays, synthetic pseudo-thread nodes are injected into the 
 - **Block I/O:** A `block_device:<dev>` pseudo-thread is created. `block_rq_issue` creates an edge from the requesting thread to the pseudo-thread; `block_rq_complete` creates the return edge.
 - **softirq:** A `softirq:<vec>` pseudo-thread is created for each softirq vector (NET_RX, BLOCK, TIMER, etc.). The `softirq_entry`/`softirq_exit` tracepoints track the active softirq vector per CPU. When a `sched_wakeup` fires within a tracked softirq context (e.g., `BLOCK_SOFTIRQ` or `NET_RX_SOFTIRQ`), the wakeup edge is attributed to the corresponding subsystem pseudo-thread (Disk or Network), bridging the causal gap between hardware interrupt completion and user-thread execution.
 
-Pseudo-threads participate in cascade redistribution and can appear in Knots, enabling attribution of delays to hardware/subsystem bottlenecks.
+Pseudo-threads participate in cascade redistribution **as destinations** — they accumulate `attributed_delay` from inbound edges (User→Disk issue events, sched_wakeup softirq attributions). Synthetic closure-return edges from pseudo-thread sources (Disk→User completion-event edges, and the Network/Softirq analogues) participate only in Tarjan SCC analysis and Knot detection — they are **cascade-terminal** and are not traversed by the cascade redistribution algorithm. The cascade engine identifies these edges via the dedicated `EdgeKind::SyntheticClosureReturn` marker, and skips them in both the outgoing-traversal entry point (`sweep_line_partition`) and the incoming-edge enumerator (`count_concurrent_waiters`); see [ADR-009 *Amendment 2026-04-25*](../decisions/ADR-009.md) for the full rule, motivation, and verification provenance. Pseudo-threads can still appear in Knots, enabling attribution of delays to hardware/subsystem bottlenecks.
 
 ### 3.4 Cascade Engine
 
@@ -577,8 +577,14 @@ Phase 3 (Stack Collection + Production HTML)    Weeks 13–16
 | **Phase 0** | `invariants_ok` (I-2 ∧ I-7) 0 violations on all test graphs; I-2 through I-5, I-7 verified by 10K proptest with 0 violations; I-6 verified by unit tests on simple chains; 5 bug regressions pass; vs Python ≤1.0ms (6 fixed scenarios); mutation ≥90% ([ADR-016](../decisions/ADR-016.md)) | **Automated** |
 | **Phase 1** | 2-thread mutex Knot detected; `invariants_ok==true` on real BPF data; all 5 coverage metrics exported in JSON; overhead <3% CPU (stress-ng 64 threads); crash recovery passes; minimal SVG readable; snapshot/golden tests cover JSON + `.wperf` output; fixture replay tests pass for parser → output; Miri clean on unsafe/FFI boundary code | Automated + manual review |
 | **Phase 2a** | Correct futex wait_type annotation; spurious wakeups filtered; `invariants_ok` preserved | Automated |
-| **Phase 2b** | IO pseudo-thread `attributed_delay ≥ 70%`; no spurious Knots from synthetic edges; `invariants_ok` preserved | Automated + manual review |
+| **Phase 2b** | IO pseudo-thread `attributed_delay_ratio ≥ 0.70` (see definition below); no spurious Knots from synthetic edges; `invariants_ok` preserved | Automated + manual review |
 | **Phase 3** | Stack depth ≥ 5 frames (with FP); Dagre layout renders; flamegraph functions readable; total overhead < 5% CPU | Automated + manual |
+
+**Phase 2b `attributed_delay_ratio` definition.** For an IO pseudo-thread node `P` (e.g., `DISK_TID`, `NIC_TID`):
+
+`attributed_delay_ratio(P) = Σ(e.attributed_delay_ms) / Σ(e.raw_wait_ms)` for every edge `e` where `e.dst == P` AND `e.kind != EdgeKind::SyntheticClosureReturn`.
+
+Synthetic closure-return edges (Disk→User completion-event edges of `EdgeKind::SyntheticClosureReturn`, and the Network/Softirq analogues) are **excluded** from both the numerator and the denominator — they are cascade-terminal per [ADR-009 *Amendment 2026-04-25*](../decisions/ADR-009.md) and have no semantic wait time to account for. Forward synthetic edges (User→Disk issue-event edges) **remain included** as inbound-to-pseudo-thread edges; they carry the I/O service time the pseudo-thread is responsible for. The ratio is undefined (`None` in the JSON output) when no inbound non-return edges exist or when their `raw_wait_ms` sum to zero (typical of sub-millisecond IO bursts where ns→ms truncation collapses windows).
 
 **Phase 1 verification notes (not exit criteria):**
 - *Non-blocking CI items:* fuzz targets (cargo-fuzz, gate promotion deferred); sanitizers (nightly, infra-dependent); benchmark framework automation (criterion, per-PR CI gating deferred)
