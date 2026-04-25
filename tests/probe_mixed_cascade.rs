@@ -140,3 +140,107 @@ fn probe_mixed_cascade_current_behavior() {
         "pre-fix inbound-only ratio ALSO below gate"
     );
 }
+
+// ============================================================================
+// Edge-filter empirical simulation — closes Challenger Gap 1
+// ============================================================================
+//
+// Challenger flagged (2026-04-25 verdict): the post-fix attribution values
+// (0, 10, 0) are human trace, not measured. Until we measure, we cannot
+// claim ratio = 1.0 post-fix — could be 0.9, 0.8, or something else.
+//
+// The proposed edge-filter rule is: during `sweep_line_partition` (cascade
+// recursion) and `count_concurrent_waiters`, skip edges that are "synthetic
+// return edges" (src is a pseudo-thread + wait_type carries the ADR-009
+// marker). The observable effect on cascade is identical to REMOVING those
+// edges from the graph entirely, because:
+//   - sweep_line_partition iterates outgoing edges — filtered = removed
+//   - count_concurrent_waiters iterates incoming — filtered = removed
+//   - the outer `for edge in graph.all_edges()` loop still includes the
+//     edge, and its attribution is computed the same way as for any other
+//     edge (propagation through the filtered view, then `raw - propagated`)
+//
+// So running current cascade on `build_mixed_graph_no_return()` (same graph
+// minus the Disk→Holder edge) measures the exact attribution the edge-filter
+// fix would produce on the forward edges — empirical, not conjectured.
+// The return edge's own attribution is known separately (it was 0 pre-fix
+// and remains 0 post-fix — confirmed in the other probe).
+
+fn build_mixed_graph_no_return() -> WaitForGraph {
+    let mut g = WaitForGraph::new();
+    let user = ThreadId(100);
+    let holder = ThreadId(200);
+    let disk = ThreadId(DISK_TID);
+
+    g.add_node(user, NodeKind::UserThread);
+    g.add_node(holder, NodeKind::UserThread);
+    g.add_node(disk, NodeKind::PseudoDisk);
+
+    g.add_edge(user, holder, TimeWindow::new(0, 10));
+    g.add_edge_with_wait_type(holder, disk, TimeWindow::new(0, 10), WaitType::IoBlock);
+    // Intentionally NO Disk→Holder return edge (simulates edge-filter skipping it)
+
+    g
+}
+
+#[test]
+#[allow(clippy::similar_names)]
+fn probe_edge_filter_simulation_post_fix_values() {
+    let g = build_mixed_graph_no_return();
+    let result = cascade_engine(&g, None).expect("cascade must succeed");
+
+    println!("\n=== probe_edge_filter_simulation_post_fix_values ===");
+    for (_, src, dst, weight) in result.all_edges() {
+        println!(
+            "  {:>4} → {:<4}  raw={:>3}  attributed={:>3}  wait_type={:?}",
+            src.0, dst.0, weight.raw_wait_ms, weight.attributed_delay_ms, weight.wait_type,
+        );
+    }
+
+    let edges = result.all_edges();
+    let user = ThreadId(100);
+    let holder = ThreadId(200);
+    let disk = ThreadId(DISK_TID);
+
+    let attr_uh = edges
+        .iter()
+        .find(|(_, s, d, _)| *s == user && *d == holder)
+        .expect("T100→T200 edge present")
+        .3
+        .attributed_delay_ms;
+    let attr_hd = edges
+        .iter()
+        .find(|(_, s, d, _)| *s == holder && *d == disk)
+        .expect("T200→DISK edge present")
+        .3
+        .attributed_delay_ms;
+
+    println!();
+    println!("edge-filter simulation (post-fix expected):");
+    println!("  T100→T200: {attr_uh}   (claimed: 0)");
+    println!("  T200→DISK: {attr_hd}   (claimed: 10)");
+
+    let ratio_inbound = {
+        let raw: u64 = 10;
+        #[allow(clippy::cast_precision_loss)]
+        (attr_hd as f64 / raw as f64)
+    };
+    println!("  ratio (inbound-only): {ratio_inbound:.3}   (gate ≥ 0.70)");
+    println!();
+
+    // Challenger Gap 1: pin the measured post-fix values. If cascade has a
+    // secondary bug that gives (0, 9, 0) instead of (0, 10, 0), this test
+    // fails loudly and we know BEFORE touching spec.
+    assert_eq!(
+        attr_uh, 0,
+        "post-fix T100→T200 MUST be 0 (T200 is victim, all blame cascades to DISK)"
+    );
+    assert_eq!(
+        attr_hd, 10,
+        "post-fix T200→DISK MUST be 10 (DISK is root cause, full attribution)"
+    );
+    assert!(
+        (ratio_inbound - 1.0).abs() < 1e-9,
+        "post-fix inbound-only ratio MUST be 1.0, got {ratio_inbound}"
+    );
+}
