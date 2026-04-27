@@ -184,29 +184,36 @@ fn fio_randread_direct() {
     assert_eq!(report.health.io_pending_at_end_count, Some(0));
     assert_eq!(report.health.io_userspace_pair_collision_count, Some(0));
 
-    // Post-PR-#121 cascade-terminal fix + post-commit-9 §7.3 ratio formula:
+    // Post-PR-#121 cascade-terminal fix + post-commit-10 §7.3 per-P ratio:
     // forward edges (User→Disk, kind=Normal) attribute to DISK at full
     // raw_wait under cascade (pseudo-thread is now a leaf for cascade —
     // its only outgoing is the SCR edge which the bilateral filter
     // skips). Return edges (kind=SyntheticClosureReturn) are excluded
-    // from the §7.3 numerator + denominator. So for 8 paired I/Os each
-    // with raw_wait=5ms (5_000_000ns / 1_000_000), ratio = 40/40 = 1.0.
+    // from §7.3 numerator + denominator. So for 8 paired I/Os each with
+    // raw_wait=5ms (5_000_000ns / 1_000_000), the per-P "disk" ratio =
+    // 40/40 = 1.0.
     //
-    // STRICT magnitude assertion per spec §7.3 L588 defense-in-depth
-    // requirement: ratio MUST be `Some(r) where 0.70 ≤ r ≤ 1.0`, not
-    // the looser `(0..=1.0)` or `is_some()`. Probe Gap 5 risk-asymmetry
-    // argument: silent ratio drift outside [0.70, 1.0] is a cascade /
-    // ratio impl regression that this fixture surfaces as fail at the
-    // unit-test layer, independent of the gate verdict at the
-    // integration-test layer.
-    let ratio = report
+    // STRICT magnitude assertion per spec §7.3 L588 defense-in-depth +
+    // per-P discipline: every observed pseudo-thread MUST be in
+    // [0.70, 1.0], and (b) hard-precondition demands at least one
+    // defined entry. 5-way reviewer convergence on per-P contract:
+    // Oracle msg=62ec6c36 + Probe msg=a1f9b1bf + Critic msg=5bcd369d +
+    // Challenger msg=a21b9b2b + Maestro msg=54b49254.
+    let ratio_map = report
         .health
         .attributed_delay_ratio
-        .expect("inbound-to-pseudo-thread edges present → ratio must be defined");
+        .as_ref()
+        .expect("inbound-to-pseudo-thread edges present → per-P map must be Some(_)");
     assert!(
-        (0.70..=1.0).contains(&ratio),
-        "ratio must be in [0.70, 1.0] per spec §7.3 L588 defense-in-depth, got {ratio}"
+        !ratio_map.is_empty(),
+        "(b) hard-precondition: ≥1 IO pseudo-thread must have a defined ratio"
     );
+    for (label, &r) in ratio_map {
+        assert!(
+            (0.70..=1.0).contains(&r),
+            "per-P {label} ratio must be in [0.70, 1.0] per spec §7.3 (a), got {r}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -330,25 +337,34 @@ fn concurrent_submitters_single_disk() {
         .count();
     assert_eq!(io_edges, 6, "3 submitters × 2 directions");
 
-    // Post-PR-#121 cascade-terminal fix + post-commit-9 §7.3 ratio formula:
+    // Post-PR-#121 cascade-terminal fix + post-commit-10 §7.3 per-P ratio:
     // forward edges (User→Disk per submitter, kind=Normal) attribute to
     // DISK at full raw_wait under cascade. Return edges (kind=SCR) excluded
     // from §7.3 numerator + denominator. With 3 submitters × 1 IO each
-    // (3ms service time), aggregate raw_sum = 3 × 3 = 9, attributed_sum =
-    // 3 × 3 = 9 (forward edges fully attributed), ratio = 1.0.
+    // (3ms service time), per-P "disk" raw_sum = 9, attributed_sum = 9,
+    // ratio = 1.0.
     //
     // STRICT magnitude assertion per spec §7.3 L588 — forward fan-in to a
     // single pseudo-thread should attribute correctly even when multiple
     // submitters share the same DISK target (Probe Gap 5 verifies the
-    // count_concurrent_waiters filter doesn't pollute fan-in).
-    let ratio = report
+    // `count_concurrent_waiters` filter doesn't pollute fan-in). Per-P
+    // ∀ check + (b) hard-precondition per 5-way reviewer convergence
+    // (Oracle msg=62ec6c36 et al.).
+    let ratio_map = report
         .health
         .attributed_delay_ratio
-        .expect("inbound-to-pseudo-thread edges present → ratio must be defined");
+        .as_ref()
+        .expect("inbound-to-pseudo-thread edges present → per-P map must be Some(_)");
     assert!(
-        (0.70..=1.0).contains(&ratio),
-        "ratio must be in [0.70, 1.0] per spec §7.3 L588 defense-in-depth, got {ratio}"
+        !ratio_map.is_empty(),
+        "(b) hard-precondition: ≥1 IO pseudo-thread must have a defined ratio"
     );
+    for (label, &r) in ratio_map {
+        assert!(
+            (0.70..=1.0).contains(&r),
+            "per-P {label} ratio must be in [0.70, 1.0] per spec §7.3 (a), got {r}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -523,25 +539,37 @@ fn commit9_magnitude_pinned_multi_io_ratio() {
     assert_eq!(report.health.io_userspace_pair_collision_count, Some(0));
 
     // STRICT pattern per Probe msg=a8a05157 §5(1) + Oracle msg=0c9bd48d
-    // §3 ratify: `Some(r) where 0.70 ≤ r ≤ 1.0`. Equivalently:
-    // None → fixture fails; Some(r < 0.70) → fixture fails;
-    // Some(r > 1.0) → fixture fails (would indicate I-2 amplification
-    // bug, but defense-in-depth: catch it here).
-    let ratio = report
+    // §3 ratify, plus per-P promotion per 5-way commit-10 convergence
+    // (Oracle msg=62ec6c36 + Probe msg=a1f9b1bf + Critic msg=5bcd369d +
+    // Challenger msg=a21b9b2b + Maestro msg=54b49254). Three layers:
+    //   1. Outer Option must be Some (§7.3 (b) hard precondition);
+    //      None means cascade or ratio impl regression.
+    //   2. Per-P value ∀ in [0.70, 1.0] (§7.3 (a) gate predicate).
+    //   3. The "disk" entry must be exactly 1.0 — clean pure-IO
+    //      workload with no upstream user-wait chain forces full
+    //      attribution to the pseudo-thread leaf (SCR filter).
+    let ratio_map = report
         .health
         .attributed_delay_ratio
-        .expect("inbound-to-pseudo-thread edges present → ratio MUST be Some(_); None means cascade or ratio impl regression");
+        .as_ref()
+        .expect("inbound-to-pseudo-thread edges present → per-P map MUST be Some(_); None means cascade or ratio impl regression");
     assert!(
-        (0.70..=1.0).contains(&ratio),
-        "Some(r) where 0.70 ≤ r ≤ 1.0 required per spec §7.3 L588 defense-in-depth, got Some({ratio})"
+        !ratio_map.is_empty(),
+        "(b) hard-precondition: ≥1 IO pseudo-thread must have a defined ratio"
     );
+    for (label, &r) in ratio_map {
+        assert!(
+            (0.70..=1.0).contains(&r),
+            "per-P {label} ratio must be in [0.70, 1.0] per spec §7.3 L588 defense-in-depth, got {r}"
+        );
+    }
 
-    // Pinned tighter — for this clean pure-IO workload with no upstream
-    // user-wait chain, post-fix attribution should be exactly 1.0
-    // (forward edges get full attribution because cascade hits the
-    // pseudo-thread leaf immediately via the SCR filter).
+    let disk = ratio_map
+        .get("disk")
+        .copied()
+        .expect("DISK pseudo-thread must appear with this all-DISK workload");
     assert!(
-        (ratio - 1.0).abs() < 1e-9,
-        "clean multi-IO workload MUST attribute exactly 1.0 (no upstream cascade chains divert blame from forward IO edges); got {ratio}"
+        (disk - 1.0).abs() < 1e-9,
+        "clean multi-IO workload MUST attribute exactly 1.0 to disk (no upstream cascade chains divert blame from forward IO edges); got {disk}"
     );
 }

@@ -194,7 +194,11 @@ IO_INVARIANTS=$(jq '.health.invariants_ok' "$IO_REPORT_FILE")
 IO_ORPHAN=$(jq '.health.io_orphan_complete_count' "$IO_REPORT_FILE")
 IO_PENDING=$(jq '.health.io_pending_at_end_count' "$IO_REPORT_FILE")
 IO_COLLISION=$(jq '.health.io_userspace_pair_collision_count' "$IO_REPORT_FILE")
-IO_RATIO=$(jq '.health.attributed_delay_ratio' "$IO_REPORT_FILE")
+# attributed_delay_ratio is now a per-IO-pseudo-thread map (post-commit-10
+# per-P promotion per spec §7.3 (a) per-P quantification). JSON shape:
+#   null  — (b) hard precondition: no IO pseudo-thread has a defined ratio
+#   {"disk": <number>, "nic": <number>, ...}  — per-P entries in [0.0, 1.0]
+IO_RATIO_RAW=$(jq -c '.health.attributed_delay_ratio' "$IO_REPORT_FILE")
 IO_EDGE_COUNT=$(jq '.cascade.graph_metrics.edge_count' "$IO_REPORT_FILE")
 
 echo "  events_read:                    $IO_EVENTS"
@@ -203,7 +207,7 @@ echo "  invariants_ok:                  $IO_INVARIANTS"
 echo "  io_orphan_complete_count:       $IO_ORPHAN"
 echo "  io_pending_at_end_count:        $IO_PENDING"
 echo "  io_userspace_pair_collision:    $IO_COLLISION"
-echo "  attributed_delay_ratio:         $IO_RATIO"
+echo "  attributed_delay_ratio:         $IO_RATIO_RAW"
 
 if [ "$IO_INVARIANTS" != "true" ]; then
     echo "FAIL: IO-phase invariants violated" >&2
@@ -220,19 +224,18 @@ if [ "$IO_ORPHAN" = "null" ] || [ "$IO_PENDING" = "null" ] || [ "$IO_COLLISION" 
     exit 1
 fi
 
-# attributed_delay_ratio is either null (no IoBlock edges seen) or a number
-# in [0.0, 1.0]. Anything else is a regression. Use jq numeric comparison.
-if [ "$IO_RATIO" != "null" ]; then
-    RATIO_OK=$(jq -r '.health.attributed_delay_ratio | if . >= 0.0 and . <= 1.0 then "ok" else "bad" end' "$IO_REPORT_FILE")
+# Per-P validation: each value must be a number in [0.0, 1.0].
+if [ "$IO_RATIO_RAW" != "null" ]; then
+    RATIO_OK=$(jq -r '.health.attributed_delay_ratio | to_entries | all(.value | type == "number" and . >= 0.0 and . <= 1.0) | if . then "ok" else "bad" end' "$IO_REPORT_FILE")
     if [ "$RATIO_OK" != "ok" ]; then
-        echo "FAIL: attributed_delay_ratio out of [0.0, 1.0]: $IO_RATIO" >&2
+        echo "FAIL: per-P attributed_delay_ratio entries out of [0.0, 1.0]: $IO_RATIO_RAW" >&2
         exit 1
     fi
 fi
 
 # If attributed_delay_ratio is populated, block_rq actually fired and
 # DISK_TID(-5) should appear as src or dst of at least one edge.
-if [ "$IO_RATIO" != "null" ]; then
+if [ "$IO_RATIO_RAW" != "null" ]; then
     DISK_EDGES=$(jq '[.cascade.edges[] | select(.src == -5 or .dst == -5)] | length' "$IO_REPORT_FILE")
     echo "  disk_pseudo_edges:              $DISK_EDGES"
     if [ "$DISK_EDGES" -eq 0 ]; then

@@ -7,6 +7,7 @@
 //! This is NOT the final §1.2 / §5.1 self-contained HTML report (Phase 3).
 //! See plan v2 for the explicit JSON field inventory and deferred fields.
 
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufWriter, Read, Seek, Write};
 
@@ -138,12 +139,27 @@ pub struct HealthMetrics {
     /// collision window Gemini flagged on PR #120 — if this fires under
     /// real workloads, the event ABI needs to carry `struct request *`.
     pub io_userspace_pair_collision_count: Option<u64>,
-    /// Fraction of block-IO raw wait time that flowed through the cascade
-    /// to become attributed delay on `WaitType::IoBlock` edges. Phase 2b
-    /// gate: `≥ 0.70` (final-design.md §3.8). `None` when no `IoBlock`
-    /// edges exist (tracing disabled or no I/O observed) or when total
-    /// `raw_wait` is zero (all sub-ms I/Os — ratio is undefined).
-    pub attributed_delay_ratio: Option<f64>,
+    /// Per-pseudo-thread block-IO attribution ratios, keyed by the IO
+    /// pseudo-thread label (`"disk"`, `"nic"`, `"softirq"`).
+    ///
+    /// Encodes the §7.3 per-P quantification verbatim: for each IO
+    /// pseudo-thread `P`, `attributed_delay_ratio(P) = Σ(e.attributed_delay_ms)
+    /// / Σ(e.raw_wait_ms)` over edges where `e.dst == P` AND
+    /// `e.kind != EdgeKind::SyntheticClosureReturn`. Pseudo-threads whose
+    /// raw-wait sum is zero (all sub-ms I/Os collapsed to zero-duration
+    /// windows) are **omitted** from the map, matching the §7.3 P-level
+    /// `None` semantic.
+    ///
+    /// Outer `None` encodes §7.3 condition (b) — the hard precondition
+    /// that at least one IO pseudo-thread has a defined ratio. The Phase
+    /// 2b gate is `not None AND every value in [0.70, 1.0]`. CI tri-state
+    /// mapping (gate fail / pass / N/A) is applied at the test-runner
+    /// level per §7.3 multi-pseudo-thread scope (a)+(b).
+    ///
+    /// Phase 2c forward-compat: when NIC/Softirq pseudo-threads enter the
+    /// WFG, they will appear as additional keys (`"nic"`, `"softirq"`)
+    /// alongside `"disk"` with no spec amendment required.
+    pub attributed_delay_ratio: Option<BTreeMap<String, f64>>,
 }
 
 /// CLI entry point: opens the file, runs the pipeline, writes output to stdout.
@@ -241,60 +257,88 @@ pub fn build_report<R: Read + Seek>(
 }
 
 /// Compute the Phase 2b `attributed_delay_ratio` per the formal §7.3
-/// definition (final-design.md, post-PR-#121 amendment):
+/// definition (final-design.md, post-PR-#121 amendment), returning a
+/// **per-IO-pseudo-thread** map.
 ///
-/// `ratio = Σ(e.attributed_delay_ms) / Σ(e.raw_wait_ms)` for every edge
-/// `e` where `e.dst` is an IO pseudo-thread AND
-/// `e.kind != EdgeKind::SyntheticClosureReturn`.
+/// For each IO pseudo-thread `P`:
 ///
-/// The aggregate sums over all IO pseudo-thread destinations (currently
-/// only `PseudoDisk`; Phase 2c adds `PseudoNic` / `PseudoSoftirq`). This
-/// matches the gate's measurement domain — only forward edges entering
-/// pseudo-threads carry real I/O service-time blame; closure-return
-/// edges are SCC bookkeeping per ADR-009 *Amendment 2026-04-25* and
-/// have no semantic wait time.
+/// `attributed_delay_ratio(P) = Σ(e.attributed_delay_ms) / Σ(e.raw_wait_ms)`
 ///
-/// Returns `None` when no qualifying edge exists (no observable IO in
-/// this workload) or when total `raw_wait` sums to zero (all sub-ms
-/// I/Os collapsed to zero-duration windows). Per §7.3 the Phase 2b
-/// gate treats `None` as a hard precondition failure (workload didn't
-/// exercise the IO Attribution gate's subject); CI tri-state mapping
-/// is applied at the test-runner level.
-fn compute_io_attributed_delay_ratio(cascaded: &crate::graph::wfg::WaitForGraph) -> Option<f64> {
+/// over every edge `e` where `e.dst == P` AND
+/// `e.kind != EdgeKind::SyntheticClosureReturn`. Closure-return edges
+/// are SCC bookkeeping per [ADR-009 *Amendment 2026-04-25*](../decisions/ADR-009.md)
+/// and have no semantic wait time.
+///
+/// Map keys are stable IO-pseudo-thread labels (`"disk"`, `"nic"`,
+/// `"softirq"`). Pseudo-threads with no inbound non-SCR edges, or whose
+/// raw-wait sum is zero (typical of sub-millisecond IO bursts where
+/// ns→ms truncation collapses windows), are **omitted** from the map —
+/// the §7.3 P-level `None` semantic.
+///
+/// Outer `None` encodes §7.3 condition (b): the hard precondition that
+/// at least one IO pseudo-thread has a defined ratio. A workload that
+/// produces no defined per-P ratio at all fails the Phase 2b gate,
+/// preventing silent-pass under cascade bugs that zero out upstream
+/// `raw_wait`. CI tri-state mapping (gate fail / pass / N/A) is applied
+/// at the test-runner level per §7.3 multi-pseudo-thread scope (a)+(b).
+///
+/// Per-P (not aggregate) is mandatory per §7.3 (a) "for every IO
+/// pseudo-thread `P` with a defined `attributed_delay_ratio(P)` ≥ 0.70".
+/// Aggregate would mask Phase 2c regressions (e.g. DISK 1.0 + NIC 0.5
+/// → aggregate 0.75 ✓ silently masks NIC ≥ 0.70 violation). 5-way
+/// reviewer convergence locked per-P contract on 2026-04-27 (Oracle
+/// msg=62ec6c36 + Probe msg=a1f9b1bf + Critic msg=5bcd369d + Challenger
+/// msg=a21b9b2b + Maestro msg=54b49254).
+fn compute_io_attributed_delay_ratio(
+    cascaded: &crate::graph::wfg::WaitForGraph,
+) -> Option<BTreeMap<String, f64>> {
     use crate::graph::types::{EdgeKind, NodeKind};
 
-    let mut raw_sum: u64 = 0;
-    let mut attributed_sum: u64 = 0;
-    let mut saw_qualifying_edge = false;
+    // Per-P accumulators keyed by IO-pseudo-thread label.
+    let mut per_p_raw: BTreeMap<&'static str, u64> = BTreeMap::new();
+    let mut per_p_attr: BTreeMap<&'static str, u64> = BTreeMap::new();
 
     for (_, _, dst_tid, weight) in cascaded.all_edges() {
-        // §7.3 predicate: `e.dst` is an IO pseudo-thread.
-        let dst_is_io_pseudo = cascaded.node_index(&dst_tid).is_some_and(|idx| {
-            matches!(
-                cascaded.node_weight(idx).kind,
-                NodeKind::PseudoDisk | NodeKind::PseudoNic | NodeKind::PseudoSoftirq
-            )
-        });
-        if !dst_is_io_pseudo {
+        let Some(idx) = cascaded.node_index(&dst_tid) else {
             continue;
-        }
+        };
+        // §7.3 predicate: `e.dst` is an IO pseudo-thread.
+        let label = match cascaded.node_weight(idx).kind {
+            NodeKind::PseudoDisk => "disk",
+            NodeKind::PseudoNic => "nic",
+            NodeKind::PseudoSoftirq => "softirq",
+            _ => continue,
+        };
         // §7.3 predicate: `e.kind != EdgeKind::SyntheticClosureReturn`.
         if weight.kind == EdgeKind::SyntheticClosureReturn {
             continue;
         }
-        saw_qualifying_edge = true;
-        raw_sum += weight.raw_wait_ms;
-        attributed_sum += weight.attributed_delay_ms;
+        *per_p_raw.entry(label).or_insert(0) += weight.raw_wait_ms;
+        *per_p_attr.entry(label).or_insert(0) += weight.attributed_delay_ms;
     }
 
-    if !saw_qualifying_edge || raw_sum == 0 {
+    // Compute per-P ratio; omit Ps whose raw_sum is zero (P-level None
+    // per §7.3 — observed but no measurable wait time).
+    let mut result: BTreeMap<String, f64> = BTreeMap::new();
+    for (&label, &raw_sum) in &per_p_raw {
+        if raw_sum == 0 {
+            continue;
+        }
+        let attr_sum = per_p_attr.get(&label).copied().unwrap_or(0);
+        // u64→f64 cast: precision loss past 2^53 ms is well outside any
+        // single capture window. Values are bounded by `raw_sum`.
+        #[allow(clippy::cast_precision_loss)]
+        let ratio = attr_sum as f64 / raw_sum as f64;
+        result.insert(label.to_string(), ratio);
+    }
+
+    // §7.3 (b) hard precondition: at least one IO pseudo-thread has a
+    // defined ratio. Empty map → outer `None` (gate failure: workload
+    // did not exercise the IO Attribution subject).
+    if result.is_empty() {
         return None;
     }
-
-    // Cast via `as` is safe: u64→f64 loses precision past 2^53 but for
-    // millisecond wait sums in a single capture this is comfortable.
-    #[allow(clippy::cast_precision_loss)]
-    Some(attributed_sum as f64 / raw_sum as f64)
+    Some(result)
 }
 
 #[cfg(test)]
@@ -364,21 +408,23 @@ mod tests {
 
     #[test]
     fn attributed_delay_ratio_some_on_io_edges() {
-        // IoBlock edges contribute to the ratio; other edges are ignored.
+        // Inbound edges to a pseudo-thread destination contribute to its
+        // per-P entry. The Disk→User direction has dst=UserThread (not an
+        // IO pseudo-thread), so it is excluded; only User→Disk counts.
         use crate::graph::types::{DISK_TID, NodeKind, TimeWindow, WaitType};
         use crate::graph::wfg::WaitForGraph;
 
         let mut g = WaitForGraph::new();
         g.add_node(ThreadId(100), NodeKind::UserThread);
         g.add_node(ThreadId(DISK_TID), NodeKind::PseudoDisk);
-        // User→Disk (IoBlock), raw=10
+        // User→Disk (IoBlock), raw=10 — counts (dst=PseudoDisk).
         g.add_edge_with_wait_type(
             ThreadId(100),
             ThreadId(DISK_TID),
             TimeWindow::new(0, 10),
             WaitType::IoBlock,
         );
-        // Disk→User (IoBlock), raw=10
+        // Disk→User (IoBlock), raw=10 — excluded (dst=UserThread).
         g.add_edge_with_wait_type(
             ThreadId(DISK_TID),
             ThreadId(100),
@@ -387,12 +433,14 @@ mod tests {
         );
 
         // EdgeWeight::new sets raw_wait_ms = attributed_delay_ms = duration,
-        // so the ratio pre-cascade equals 1.0.
-        let ratio = compute_io_attributed_delay_ratio(&g).expect("IO edges present");
+        // so the per-P ratio pre-cascade equals 1.0 for "disk".
+        let map = compute_io_attributed_delay_ratio(&g).expect("IO edges present");
+        let disk = map.get("disk").copied().expect("disk entry present");
         assert!(
-            (ratio - 1.0).abs() < 1e-9,
-            "expected ratio=1.0, got {ratio}"
+            (disk - 1.0).abs() < 1e-9,
+            "expected disk ratio=1.0, got {disk}"
         );
+        assert_eq!(map.len(), 1, "only disk pseudo-thread observed");
     }
 
     #[test]
