@@ -240,28 +240,54 @@ pub fn build_report<R: Read + Seek>(
     })
 }
 
-/// Compute `sum(attributed_delay) / sum(raw_wait)` across all `IoBlock`-typed
-/// edges in the cascaded graph. Returns `None` when no `IoBlock` edges exist
-/// (block-IO tracing disabled or no I/O observed) or when total `raw_wait`
-/// sums to zero (all sub-millisecond I/Os — ratio undefined).
+/// Compute the Phase 2b `attributed_delay_ratio` per the formal §7.3
+/// definition (final-design.md, post-PR-#121 amendment):
 ///
-/// Phase 2b gate (final-design.md §3.8): `≥ 0.70`.
+/// `ratio = Σ(e.attributed_delay_ms) / Σ(e.raw_wait_ms)` for every edge
+/// `e` where `e.dst` is an IO pseudo-thread AND
+/// `e.kind != EdgeKind::SyntheticClosureReturn`.
+///
+/// The aggregate sums over all IO pseudo-thread destinations (currently
+/// only `PseudoDisk`; Phase 2c adds `PseudoNic` / `PseudoSoftirq`). This
+/// matches the gate's measurement domain — only forward edges entering
+/// pseudo-threads carry real I/O service-time blame; closure-return
+/// edges are SCC bookkeeping per ADR-009 *Amendment 2026-04-25* and
+/// have no semantic wait time.
+///
+/// Returns `None` when no qualifying edge exists (no observable IO in
+/// this workload) or when total `raw_wait` sums to zero (all sub-ms
+/// I/Os collapsed to zero-duration windows). Per §7.3 the Phase 2b
+/// gate treats `None` as a hard precondition failure (workload didn't
+/// exercise the IO Attribution gate's subject); CI tri-state mapping
+/// is applied at the test-runner level.
 fn compute_io_attributed_delay_ratio(cascaded: &crate::graph::wfg::WaitForGraph) -> Option<f64> {
-    use crate::graph::types::WaitType;
+    use crate::graph::types::{EdgeKind, NodeKind};
 
     let mut raw_sum: u64 = 0;
     let mut attributed_sum: u64 = 0;
-    let mut saw_io_edge = false;
+    let mut saw_qualifying_edge = false;
 
-    for (_, _, _, weight) in cascaded.all_edges() {
-        if weight.wait_type == Some(WaitType::IoBlock) {
-            saw_io_edge = true;
-            raw_sum += weight.raw_wait_ms;
-            attributed_sum += weight.attributed_delay_ms;
+    for (_, _, dst_tid, weight) in cascaded.all_edges() {
+        // §7.3 predicate: `e.dst` is an IO pseudo-thread.
+        let dst_is_io_pseudo = cascaded.node_index(&dst_tid).is_some_and(|idx| {
+            matches!(
+                cascaded.node_weight(idx).kind,
+                NodeKind::PseudoDisk | NodeKind::PseudoNic | NodeKind::PseudoSoftirq
+            )
+        });
+        if !dst_is_io_pseudo {
+            continue;
         }
+        // §7.3 predicate: `e.kind != EdgeKind::SyntheticClosureReturn`.
+        if weight.kind == EdgeKind::SyntheticClosureReturn {
+            continue;
+        }
+        saw_qualifying_edge = true;
+        raw_sum += weight.raw_wait_ms;
+        attributed_sum += weight.attributed_delay_ms;
     }
 
-    if !saw_io_edge || raw_sum == 0 {
+    if !saw_qualifying_edge || raw_sum == 0 {
         return None;
     }
 

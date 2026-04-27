@@ -184,22 +184,28 @@ fn fio_randread_direct() {
     assert_eq!(report.health.io_pending_at_end_count, Some(0));
     assert_eq!(report.health.io_userspace_pair_collision_count, Some(0));
 
-    // Pure-IO 2-cycle workloads zero out under cascade: User→Disk recurses
-    // into Disk, Disk→User recurses back into User which is already in
-    // path, returns `self_blame = duration` → propagated back → attributed
-    // = raw - propagated = 0. This is correct cascade semantics for
-    // closed cycles (nobody is "directly responsible" in isolation). The
-    // Phase 2b gate `attributed_delay_ratio ≥ 0.70` applies to mixed
-    // workloads where IoBlock edges connect to futex/switch chains that
-    // pull attribution into the IO subgraph. Here we only assert the
-    // ratio is well-defined (not None, not NaN).
+    // Post-PR-#121 cascade-terminal fix + post-commit-9 §7.3 ratio formula:
+    // forward edges (User→Disk, kind=Normal) attribute to DISK at full
+    // raw_wait under cascade (pseudo-thread is now a leaf for cascade —
+    // its only outgoing is the SCR edge which the bilateral filter
+    // skips). Return edges (kind=SyntheticClosureReturn) are excluded
+    // from the §7.3 numerator + denominator. So for 8 paired I/Os each
+    // with raw_wait=5ms (5_000_000ns / 1_000_000), ratio = 40/40 = 1.0.
+    //
+    // STRICT magnitude assertion per spec §7.3 L588 defense-in-depth
+    // requirement: ratio MUST be `Some(r) where 0.70 ≤ r ≤ 1.0`, not
+    // the looser `(0..=1.0)` or `is_some()`. Probe Gap 5 risk-asymmetry
+    // argument: silent ratio drift outside [0.70, 1.0] is a cascade /
+    // ratio impl regression that this fixture surfaces as fail at the
+    // unit-test layer, independent of the gate verdict at the
+    // integration-test layer.
     let ratio = report
         .health
         .attributed_delay_ratio
-        .expect("IoBlock edges present → ratio must be defined");
+        .expect("inbound-to-pseudo-thread edges present → ratio must be defined");
     assert!(
-        (0.0..=1.0).contains(&ratio),
-        "ratio must be in [0, 1], got {ratio}"
+        (0.70..=1.0).contains(&ratio),
+        "ratio must be in [0.70, 1.0] per spec §7.3 L588 defense-in-depth, got {ratio}"
     );
 }
 
@@ -324,15 +330,24 @@ fn concurrent_submitters_single_disk() {
         .count();
     assert_eq!(io_edges, 6, "3 submitters × 2 directions");
 
-    // Ratio is well-defined (raw_sum > 0). Concrete value depends on the
-    // same cascade-cycle behavior documented in `fio_randread_direct`.
+    // Post-PR-#121 cascade-terminal fix + post-commit-9 §7.3 ratio formula:
+    // forward edges (User→Disk per submitter, kind=Normal) attribute to
+    // DISK at full raw_wait under cascade. Return edges (kind=SCR) excluded
+    // from §7.3 numerator + denominator. With 3 submitters × 1 IO each
+    // (3ms service time), aggregate raw_sum = 3 × 3 = 9, attributed_sum =
+    // 3 × 3 = 9 (forward edges fully attributed), ratio = 1.0.
+    //
+    // STRICT magnitude assertion per spec §7.3 L588 — forward fan-in to a
+    // single pseudo-thread should attribute correctly even when multiple
+    // submitters share the same DISK target (Probe Gap 5 verifies the
+    // count_concurrent_waiters filter doesn't pollute fan-in).
     let ratio = report
         .health
         .attributed_delay_ratio
-        .expect("IoBlock edges present → ratio must be defined");
+        .expect("inbound-to-pseudo-thread edges present → ratio must be defined");
     assert!(
-        (0.0..=1.0).contains(&ratio),
-        "ratio must be in [0, 1], got {ratio}"
+        (0.70..=1.0).contains(&ratio),
+        "ratio must be in [0.70, 1.0] per spec §7.3 L588 defense-in-depth, got {ratio}"
     );
 }
 
@@ -425,4 +440,108 @@ fn all_io_edges_annotated_with_ioblock_wait_type() {
             "every edge produced by IO dispatch must carry WaitType::IoBlock"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2b commit-9 magnitude-pinned multi-IO fixture
+// (per spec final-design.md §7.3 L588 byte-encoded defense-in-depth)
+// ---------------------------------------------------------------------------
+
+/// Magnitude-pinned multi-IO fixture per spec final-design.md §7.3 L588:
+///
+/// > "commit-9 multi-IO fixtures (issue #38) MUST assert
+/// >  `attributed_delay_ratio` is `Some(r) where 0.70 ≤ r ≤ 1.0` rather
+/// >  than the looser `(0..=1.0)` range"
+///
+/// Probe risk-asymmetry argument (PR #121 thread, Probe msg=a8a05157 §2):
+/// the spec gate is the system-level safety net (catches all-None /
+/// cascade producing zero `raw_wait`), and the fixture-level magnitude
+/// assert is the unit-test-level safety net (catches per-edge ratio
+/// computation bugs that produce `Some(r)` with `r < 0.70` when the
+/// real answer should be ~1.0). Both layers required per Oracle
+/// msg=0c9bd48d §3 ratification of Probe §5(1) two-layer
+/// defense-in-depth pattern.
+///
+/// Workload shape: 5 paired I/Os from a single submitter to one device,
+/// each with 4ms service time (well above ns→ms truncation threshold).
+/// Post-PR-#121 cascade: forward edges (Normal kind, dst=Disk) get full
+/// attribution; return edges (SCR kind) excluded from §7.3 ratio.
+/// Expected: ratio = 5×4 / 5×4 = 1.0 exactly.
+#[test]
+#[allow(clippy::similar_names)] // tgid / tid mirror WperfEvent field names
+fn commit9_magnitude_pinned_multi_io_ratio() {
+    use wperf::format::event::{EventType, WperfEvent};
+    use wperf::format::reader::WperfReader;
+    use wperf::format::writer::WperfWriter;
+    use wperf::report::{self, ReportOutput};
+
+    fn run(events: &[WperfEvent]) -> ReportOutput {
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut w = WperfWriter::new(buf).expect("writer");
+        for ev in events {
+            w.write_event(ev).expect("write_event");
+        }
+        let data = w.finish(0).expect("finish").into_inner();
+        let mut r = WperfReader::open(std::io::Cursor::new(data)).expect("reader");
+        report::build_report(&mut r, wperf::correlate::DEFAULT_SPURIOUS_THRESHOLD_NS)
+            .expect("build_report")
+    }
+
+    let tgid = 700u32;
+    let tid = 700u32;
+    let dev = 0x800_0007u32;
+    let mut events: Vec<WperfEvent> = Vec::new();
+    for i in 0..5u64 {
+        let sector = 0x4000 + i * 0x100;
+        let issue_ts = 1_000_000 + i * 10_000_000;
+        let complete_ts = issue_ts + 4_000_000; // 4ms service time
+        events.push(io_event(
+            issue_ts,
+            tgid,
+            tid,
+            dev,
+            sector,
+            8,
+            EventType::IoIssue,
+        ));
+        events.push(io_event(
+            complete_ts,
+            tgid,
+            tid,
+            dev,
+            sector,
+            8,
+            EventType::IoComplete,
+        ));
+    }
+
+    let report = run(&events);
+
+    assert!(report.health.invariants_ok);
+    assert_eq!(report.health.io_orphan_complete_count, Some(0));
+    assert_eq!(report.health.io_pending_at_end_count, Some(0));
+    assert_eq!(report.health.io_userspace_pair_collision_count, Some(0));
+
+    // STRICT pattern per Probe msg=a8a05157 §5(1) + Oracle msg=0c9bd48d
+    // §3 ratify: `Some(r) where 0.70 ≤ r ≤ 1.0`. Equivalently:
+    // None → fixture fails; Some(r < 0.70) → fixture fails;
+    // Some(r > 1.0) → fixture fails (would indicate I-2 amplification
+    // bug, but defense-in-depth: catch it here).
+    let ratio = report
+        .health
+        .attributed_delay_ratio
+        .expect("inbound-to-pseudo-thread edges present → ratio MUST be Some(_); None means cascade or ratio impl regression");
+    assert!(
+        (0.70..=1.0).contains(&ratio),
+        "Some(r) where 0.70 ≤ r ≤ 1.0 required per spec §7.3 L588 defense-in-depth, got Some({ratio})"
+    );
+
+    // Pinned tighter — for this clean pure-IO workload with no upstream
+    // user-wait chain, post-fix attribution should be exactly 1.0
+    // (forward edges get full attribution because cascade hits the
+    // pseudo-thread leaf immediately via the SCR filter).
+    assert!(
+        (ratio - 1.0).abs() < 1e-9,
+        "clean multi-IO workload MUST attribute exactly 1.0 (no upstream cascade chains divert blame from forward IO edges); got {ratio}"
+    );
 }
