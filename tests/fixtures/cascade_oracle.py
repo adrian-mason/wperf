@@ -14,6 +14,19 @@ testing oracle. Phase 0 differential testing (Issue #20) should restrict
 test inputs to non-overlapping topologies when comparing against this
 script, and rely on invariant assertions (I-2 through I-7, ADR-016) for complex graphs.
 
+ADR-009 Amendment 2026-04-25 — synthetic closure-return edges (Disk->User
+completion-event edges, and Network/Softirq analogues) are cascade-terminal:
+they participate in Tarjan SCC analysis but are NOT traversed by the cascade
+redistribution algorithm. The `add_edge(..., kind="synthetic_closure_return")`
+marker on Edge tells `_compute_cascade` to skip the edge in BOTH outgoing
+traversal AND any waiter-counting logic; applying the filter to only one
+site silently halves the cascade transfer for the forward edge (Probe
+finding, PR #120 5-way thread). The filter is behaviorally inert in this
+oracle's supported topologies (2-cycle synthetic-edge graphs are out of
+scope per the linear-chain limitation), but the rule must be encoded here
+for forward-compat with future oracle extensions and for documentation
+parity with the Rust production cascade.
+
 Validates:
 1. SCC/Knot detection using NetworkX
 2. Cascade redistribution on linear/tree graphs (ADR-007 pseudocode)
@@ -108,12 +121,17 @@ class TimeWindow:
 
 
 class Edge:
-    def __init__(self, src, dst, window, raw_wait):
+    def __init__(self, src, dst, window, raw_wait, kind="normal"):
         self.src = src
         self.dst = dst
         self.window = window
         self.raw_wait = raw_wait
         self.attributed = raw_wait  # initially = raw
+        # Edge kind — "normal" or "synthetic_closure_return". The latter
+        # mirrors EdgeKind::SyntheticClosureReturn in the Rust impl
+        # (ADR-009 Amendment 2026-04-25). Cascade-terminal: not traversed
+        # in either outgoing-walk or waiter-counting.
+        self.kind = kind
 
 
 class CascadeGraph:
@@ -123,14 +141,20 @@ class CascadeGraph:
         self.edges = []  # list of Edge
         self.outgoing = {}  # node -> [Edge]
 
-    def add_edge(self, src, dst, start, end):
+    def add_edge(self, src, dst, start, end, kind="normal"):
         raw_wait = end - start
-        e = Edge(src, dst, TimeWindow(start, end), raw_wait)
+        e = Edge(src, dst, TimeWindow(start, end), raw_wait, kind=kind)
         self.edges.append(e)
         self.outgoing.setdefault(src, []).append(e)
 
     def get_outgoing(self, node):
-        return self.outgoing.get(node, [])
+        # ADR-009 Amendment 2026-04-25: synthetic closure-return edges are
+        # cascade-terminal — skip them in outgoing traversal. The Rust
+        # production cascade applies the same filter to count_concurrent_waiters
+        # incoming-edge enumeration; this oracle's linear-chain scope does not
+        # exercise count_concurrent_waiters, so only the outgoing-side filter
+        # is needed here. Both filters MUST land together in the Rust impl.
+        return [e for e in self.outgoing.get(node, []) if e.kind != "synthetic_closure_return"]
 
 
 def cascade_redistribute(graph, max_depth=10):
