@@ -8,7 +8,7 @@ use petgraph::Direction;
 use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
 
-use super::types::{EdgeWeight, NodeKind, NodeWeight, ThreadId, TimeWindow, WaitType};
+use super::types::{EdgeKind, EdgeWeight, NodeKind, NodeWeight, ThreadId, TimeWindow, WaitType};
 
 /// The Wait-For Graph. Directed graph where:
 /// - Nodes = threads (or pseudo-threads)
@@ -60,6 +60,30 @@ impl WaitForGraph {
             src_idx,
             dst_idx,
             EdgeWeight::with_wait_type(window, wait_type),
+        )
+    }
+
+    /// Add an ADR-009 synthetic closure-return edge (cascade-terminal).
+    ///
+    /// The edge is annotated with `wait_type` for downstream report
+    /// rendering and marked with `EdgeKind::SyntheticClosureReturn` so
+    /// that `sweep_line_partition` and `count_concurrent_waiters` skip
+    /// it during cascade redistribution. The edge still participates
+    /// in Tarjan SCC analysis and Knot detection (final-design.md
+    /// §3.3).
+    pub fn add_synthetic_closure_return(
+        &mut self,
+        src: ThreadId,
+        dst: ThreadId,
+        window: TimeWindow,
+        wait_type: WaitType,
+    ) -> EdgeIndex {
+        let src_idx = *self.node_map.get(&src).expect("src node not in graph");
+        let dst_idx = *self.node_map.get(&dst).expect("dst node not in graph");
+        self.graph.add_edge(
+            src_idx,
+            dst_idx,
+            EdgeWeight::synthetic_closure_return(window, wait_type),
         )
     }
 
@@ -148,21 +172,27 @@ impl WaitForGraph {
         for (&tid, &idx) in &self.node_map {
             new.add_node(tid, self.graph[idx].kind);
         }
-        // Clone edges — preserve wait_type across cascade so downstream
-        // consumers (HealthMetrics attributed_delay_ratio, DOT rendering,
-        // SCC annotations) can still inspect per-edge semantics after
-        // redistribution. Attribution is reset by EdgeWeight::new /
-        // with_wait_type (both set attributed_delay_ms = raw_wait_ms).
+        // Clone edges — preserve wait_type AND kind across cascade so
+        // downstream consumers (HealthMetrics attributed_delay_ratio,
+        // DOT rendering, SCC annotations, and the cascade engine's own
+        // SCR filter) can inspect per-edge semantics after
+        // redistribution. Attribution is reset by EdgeWeight constructors
+        // (all set attributed_delay_ms = raw_wait_ms).
         for eidx in self.graph.edge_indices() {
             let (src, dst) = self.graph.edge_endpoints(eidx).unwrap();
             let src_tid = self.graph[src].tid;
             let dst_tid = self.graph[dst].tid;
             let weight = &self.graph[eidx];
-            match weight.wait_type {
-                Some(wt) => {
+            match (weight.wait_type, weight.kind) {
+                (Some(wt), EdgeKind::SyntheticClosureReturn) => {
+                    new.add_synthetic_closure_return(src_tid, dst_tid, weight.time_window, wt);
+                }
+                (Some(wt), EdgeKind::Normal) => {
                     new.add_edge_with_wait_type(src_tid, dst_tid, weight.time_window, wt);
                 }
-                None => {
+                (None, _) => {
+                    // Edges without wait_type are by construction Normal
+                    // (no SCR factory leaves wait_type unset).
                     new.add_edge(src_tid, dst_tid, weight.time_window);
                 }
             }

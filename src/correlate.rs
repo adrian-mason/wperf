@@ -455,8 +455,18 @@ fn handle_io_complete(
 
     graph.add_node(user, NodeKind::UserThread);
     graph.add_node(disk, NodeKind::PseudoDisk);
+    // Forward (issue) edge — real wait dependency, normal cascade traversal.
     graph.add_edge_with_wait_type(user, disk, window, WaitType::IoBlock);
-    graph.add_edge_with_wait_type(disk, user, window, WaitType::IoBlock);
+    // Return (completion) edge — ADR-009 *Amendment 2026-04-25*
+    // cascade-terminal. Participates in Tarjan SCC analysis and Knot
+    // detection; cascade engine skips it via the
+    // `EdgeKind::SyntheticClosureReturn` marker in both
+    // `sweep_line_partition` (outgoing-traversal) and
+    // `count_concurrent_waiters` (incoming-edge enumerator). P2c
+    // PseudoNic / PseudoSoftirq mirror return edges MUST reuse this
+    // same constructor when they land — the marker is type-system-
+    // enforced via `EdgeWeight::synthetic_closure_return`.
+    graph.add_synthetic_closure_return(disk, user, window, WaitType::IoBlock);
     stats.edges_created += 2;
 }
 

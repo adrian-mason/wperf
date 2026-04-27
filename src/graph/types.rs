@@ -85,6 +85,38 @@ pub enum WaitType {
     IoBlock,
 }
 
+/// Edge category for cascade traversal control (ADR-009 *Amendment
+/// 2026-04-25*, final-design.md §3.3).
+///
+/// `Normal` edges participate fully in cascade redistribution.
+///
+/// `SyntheticClosureReturn` edges (e.g., Disk→User completion-event edges,
+/// and the analogous Network→User and Softirq→User edges introduced by
+/// future phases) are SCC closure bookkeeping — they participate in
+/// Tarjan SCC analysis and Knot detection but are **cascade-terminal**:
+/// the cascade engine skips them in both `sweep_line_partition`
+/// (outgoing-traversal entry point) and `count_concurrent_waiters`
+/// (incoming-edge enumerator). Forward synthetic edges (User→Disk
+/// issue-event edges) remain `Normal` — they carry real I/O service
+/// time and participate in cascade as inbound waits.
+///
+/// Phase 2c forward-compat: `PseudoNic` / `PseudoSoftirq` mirror return
+/// edges MUST reuse this same marker. The cascade engine's filter
+/// predicate is keyed off this enum value; additional cascade-terminal
+/// classes would require either a new enum variant or migration of the
+/// predicate, both of which are out of scope for this Phase 2b
+/// amendment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeKind {
+    /// Real wait dependency. Default for `add_edge` and
+    /// `add_edge_with_wait_type`.
+    #[default]
+    Normal,
+    /// SCC closure-return edge (ADR-009 cascade-terminal).
+    SyntheticClosureReturn,
+}
+
 /// Edge metadata in the Wait-For Graph.
 #[derive(Debug, Clone, Serialize)]
 pub struct EdgeWeight {
@@ -92,6 +124,10 @@ pub struct EdgeWeight {
     pub raw_wait_ms: u64,
     pub attributed_delay_ms: u64,
     pub wait_type: Option<WaitType>,
+    /// Cascade-traversal classification. `Normal` for real wait
+    /// dependencies (default); `SyntheticClosureReturn` for ADR-009
+    /// cascade-terminal closure-return edges.
+    pub kind: EdgeKind,
 }
 
 impl EdgeWeight {
@@ -102,12 +138,25 @@ impl EdgeWeight {
             raw_wait_ms: raw,
             attributed_delay_ms: raw,
             wait_type: None,
+            kind: EdgeKind::Normal,
         }
     }
 
     pub fn with_wait_type(time_window: TimeWindow, wait_type: WaitType) -> Self {
         let mut this = Self::new(time_window);
         this.wait_type = Some(wait_type);
+        this
+    }
+
+    /// Constructor for ADR-009 synthetic closure-return edges (cascade-
+    /// terminal). The `wait_type` is annotated for downstream report
+    /// rendering (typically `WaitType::IoBlock` for block-IO return);
+    /// the kind is fixed at `SyntheticClosureReturn` so the cascade
+    /// engine's `sweep_line_partition` and `count_concurrent_waiters`
+    /// filters skip it consistently.
+    pub fn synthetic_closure_return(time_window: TimeWindow, wait_type: WaitType) -> Self {
+        let mut this = Self::with_wait_type(time_window, wait_type);
+        this.kind = EdgeKind::SyntheticClosureReturn;
         this
     }
 }

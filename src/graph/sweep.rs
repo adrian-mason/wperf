@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 
-use super::types::{ElementaryInterval, ThreadId, TimeWindow};
+use super::types::{EdgeKind, ElementaryInterval, ThreadId, TimeWindow};
 use super::wfg::WaitForGraph;
 
 use petgraph::Direction;
@@ -31,10 +31,25 @@ pub fn sweep_line_partition(
         return Vec::new();
     };
 
-    // Collect clipped intervals: (clipped_window, target_tid)
+    // Collect clipped intervals: (clipped_window, target_tid).
+    //
+    // ADR-009 Amendment 2026-04-25 (final-design.md §3.3): synthetic
+    // closure-return edges (`EdgeKind::SyntheticClosureReturn`) are
+    // cascade-terminal — they participate in Tarjan SCC analysis but
+    // are NOT traversed by cascade redistribution. Skip them here so
+    // recursion into the pseudo-thread sees no outgoing dependencies
+    // (the pseudo-thread becomes a leaf for cascade purposes). The
+    // analogous filter on incoming edges lives in
+    // `count_concurrent_waiters` (engine.rs); both filters MUST be
+    // applied — applying only one leaves the divisor polluted by
+    // bookkeeping edges and silently halves cascade transfer on the
+    // forward direction (PR #120 5-way thread, Probe Gap 5).
     let mut clipped: Vec<(TimeWindow, ThreadId)> = Vec::new();
     for edge_ref in graph.graph.edges_directed(node_idx, Direction::Outgoing) {
         let ew = edge_ref.weight();
+        if ew.kind == EdgeKind::SyntheticClosureReturn {
+            continue;
+        }
         if let Some(overlap) = window.overlap(&ew.time_window) {
             let target_tid = graph.graph[edge_ref.target()].tid;
             clipped.push((overlap, target_tid));

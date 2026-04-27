@@ -15,7 +15,7 @@ use std::collections::BTreeSet;
 use petgraph::graph::EdgeIndex;
 
 use crate::graph::sweep::sweep_line_partition;
-use crate::graph::types::{ThreadId, TimeWindow};
+use crate::graph::types::{EdgeKind, ThreadId, TimeWindow};
 use crate::graph::wfg::WaitForGraph;
 
 use super::invariants;
@@ -142,9 +142,20 @@ fn count_concurrent_waiters(graph: &WaitForGraph, target: ThreadId, window: &Tim
         return 1;
     };
 
+    // ADR-009 Amendment 2026-04-25 (final-design.md §3.3): synthetic
+    // closure-return edges (`EdgeKind::SyntheticClosureReturn`) are
+    // cascade-terminal and must NOT count as concurrent waiters; they
+    // represent SCC closure bookkeeping, not real wait dependencies.
+    // Skipping them here is the second of the two filter sites
+    // mandated by the amendment (the first is in
+    // `sweep_line_partition`). Applying only one of the two leaves
+    // the divisor polluted by bookkeeping edges and silently halves
+    // cascade transfer on the forward direction (PR #120 5-way
+    // thread, Probe Gap 5).
     let count = graph
         .incoming_edges(node_idx)
         .iter()
+        .filter(|(_, _, ew)| ew.kind != EdgeKind::SyntheticClosureReturn)
         .filter(|(_, _, ew)| ew.time_window.overlap(window).is_some())
         .map(|(_, src_tid, _)| *src_tid)
         .collect::<BTreeSet<_>>()
