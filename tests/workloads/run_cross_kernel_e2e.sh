@@ -247,6 +247,6 @@ fi
 echo ""
 echo "=== Cross-Kernel E2E Phase 2 (block_rq smoke): PASSED ==="
 echo "  kernel $(uname -r): block_rq path exercised"
-echo "  events=$IO_EVENTS edges=$IO_EDGE_COUNT ratio=$IO_RATIO"
+echo "  events=$IO_EVENTS edges=$IO_EDGE_COUNT ratio=$IO_RATIO_RAW"
 echo ""
 echo "=== Cross-Kernel E2E: ALL PHASES PASSED ==="
