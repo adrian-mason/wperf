@@ -8,7 +8,7 @@ use petgraph::Direction;
 use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
 
-use super::types::{EdgeKind, EdgeWeight, NodeKind, NodeWeight, ThreadId, TimeWindow, WaitType};
+use super::types::{EdgeWeight, NodeKind, NodeWeight, ThreadId, TimeWindow, WaitType};
 
 /// The Wait-For Graph. Directed graph where:
 /// - Nodes = threads (or pseudo-threads)
@@ -175,27 +175,21 @@ impl WaitForGraph {
         // Clone edges — preserve wait_type AND kind across cascade so
         // downstream consumers (HealthMetrics attributed_delay_ratio,
         // DOT rendering, SCC annotations, and the cascade engine's own
-        // SCR filter) can inspect per-edge semantics after
-        // redistribution. Attribution is reset by EdgeWeight constructors
-        // (all set attributed_delay_ms = raw_wait_ms).
+        // SCR filter) can inspect per-edge semantics after redistribution.
+        // Direct EdgeWeight clone + attribution reset replaces the older
+        // factory-dispatch match — fewer arms, single source of truth for
+        // per-edge state. NodeIndex must be resolved through `node_map`
+        // because `new` was rebuilt in sorted-tid order (BTreeMap), so its
+        // NodeIndex assignments do not match `self.graph`.
         for eidx in self.graph.edge_indices() {
             let (src, dst) = self.graph.edge_endpoints(eidx).unwrap();
             let src_tid = self.graph[src].tid;
             let dst_tid = self.graph[dst].tid;
-            let weight = &self.graph[eidx];
-            match (weight.wait_type, weight.kind) {
-                (Some(wt), EdgeKind::SyntheticClosureReturn) => {
-                    new.add_synthetic_closure_return(src_tid, dst_tid, weight.time_window, wt);
-                }
-                (Some(wt), EdgeKind::Normal) => {
-                    new.add_edge_with_wait_type(src_tid, dst_tid, weight.time_window, wt);
-                }
-                (None, _) => {
-                    // Edges without wait_type are by construction Normal
-                    // (no SCR factory leaves wait_type unset).
-                    new.add_edge(src_tid, dst_tid, weight.time_window);
-                }
-            }
+            let new_src = new.node_map[&src_tid];
+            let new_dst = new.node_map[&dst_tid];
+            let mut new_weight = self.graph[eidx].clone();
+            new_weight.attributed_delay_ms = new_weight.raw_wait_ms;
+            new.graph.add_edge(new_src, new_dst, new_weight);
         }
         new
     }

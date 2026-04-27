@@ -382,13 +382,11 @@ fn kernel_version_ge(major: u32, minor: u32) -> bool {
     if unsafe { libc::uname(&raw mut uts) } != 0 {
         return true;
     }
-    let release_ptr = uts.release.as_ptr().cast::<u8>();
-    let release_bytes = unsafe { std::slice::from_raw_parts(release_ptr, uts.release.len()) };
-    let end = release_bytes
-        .iter()
-        .position(|&b| b == 0)
-        .unwrap_or(release_bytes.len());
-    let Ok(release) = std::str::from_utf8(&release_bytes[..end]) else {
+    // SAFETY: `uname(2)` guarantees `uts.release` is NUL-terminated on
+    // success. `CStr::from_ptr` finds the terminator and returns a slice
+    // bounded by it; UTF-8 validation handled by `to_str`.
+    let release_cstr = unsafe { std::ffi::CStr::from_ptr(uts.release.as_ptr()) };
+    let Ok(release) = release_cstr.to_str() else {
         return true;
     };
     let mut parts = release.split(['.', '-']);
