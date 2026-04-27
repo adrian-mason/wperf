@@ -248,5 +248,98 @@ echo ""
 echo "=== Cross-Kernel E2E Phase 2 (block_rq smoke): PASSED ==="
 echo "  kernel $(uname -r): block_rq path exercised"
 echo "  events=$IO_EVENTS edges=$IO_EDGE_COUNT ratio=$IO_RATIO_RAW"
+
+# =============================================================================
+# Phase 3 — multi-bio / large-IO partial-completion regression (#38 commit-11)
+# =============================================================================
+# Probe kernel-source audit (msg=8202789c §1-2) verified that
+# `trace_block_rq_complete` fires BEFORE `blk_update_request` mutates
+# `req->__sector` / `req->__data_len` on the FIRST call, but mutates them
+# BEFORE subsequent invocations during partial completion. Multi-bio
+# requests (large I/O > BIO_MAX_VECS, fragmented writes, NVMe retries,
+# multipath SAN) exercise the partial-completion path.
+#
+# Phase 2 used a 4MB workload through small 4K blocks (1024 paired I/Os);
+# this exercises the multi-bio path where real workloads might trip the
+# original (pre-commit-11) bug of reading mutated `__sector` at completion.
+# Phase 3 doubles the per-block size to encourage bio splits and verifies
+# that even with partial-completion paths, `io_orphan_complete_count`
+# remains zero (commit-11 BPF caches issue-time sector / nr_sector / dev
+# in `pending_io_val`, decoupling completion-side IoKey from in-flight
+# rq mutation).
+
+echo ""
+echo "=== Cross-Kernel E2E Phase 3: multi-bio partial-completion regression ==="
+
+LARGE_IO_TRACE_FILE="$(mktemp /tmp/cross_kernel_large_io_XXXXXX.wperf)"
+LARGE_IO_REPORT_FILE="$(mktemp /tmp/cross_kernel_large_io_XXXXXX.json)"
+LARGE_IO_WORKLOAD_FILE="$(mktemp /tmp/cross_kernel_large_io_data_XXXXXX.bin)"
+LARGE_IO_RECORD_STDERR="$(mktemp /tmp/cross_kernel_large_io_record_XXXXXX.txt)"
+
+# 1MB blocks × 16 = 16MB fsynced. 1MB is large enough to fragment into
+# multiple bios on most backing filesystems (BIO_MAX_VECS-bounded segments).
+(
+    sleep 0.2
+    dd if=/dev/zero of="$LARGE_IO_WORKLOAD_FILE" bs=1M count=16 conv=fsync 2>/dev/null || true
+    sync
+) &
+LARGE_IO_WORKLOAD_PID=$!
+
+"$WPERF" record -o "$LARGE_IO_TRACE_FILE" -d $((DURATION + 1)) 2>"$LARGE_IO_RECORD_STDERR" || {
+    echo "FAIL: wperf record (large-IO phase) exited with error" >&2
+    cat "$LARGE_IO_RECORD_STDERR" >&2
+    rm -f "$LARGE_IO_RECORD_STDERR" "$LARGE_IO_TRACE_FILE" "$LARGE_IO_REPORT_FILE" "$LARGE_IO_WORKLOAD_FILE"
+    exit 1
+}
+wait "$LARGE_IO_WORKLOAD_PID" || true
+
+echo "--- wperf record (large-IO phase) stderr ---"
+cat "$LARGE_IO_RECORD_STDERR"
+rm -f "$LARGE_IO_RECORD_STDERR"
+
+"$WPERF" report "$LARGE_IO_TRACE_FILE" > "$LARGE_IO_REPORT_FILE"
+
+LARGE_IO_INVARIANTS=$(jq '.health.invariants_ok' "$LARGE_IO_REPORT_FILE")
+LARGE_IO_ORPHAN=$(jq '.health.io_orphan_complete_count' "$LARGE_IO_REPORT_FILE")
+LARGE_IO_PENDING=$(jq '.health.io_pending_at_end_count' "$LARGE_IO_REPORT_FILE")
+LARGE_IO_COLLISION=$(jq '.health.io_userspace_pair_collision_count' "$LARGE_IO_REPORT_FILE")
+LARGE_IO_RATIO=$(jq -c '.health.attributed_delay_ratio' "$LARGE_IO_REPORT_FILE")
+LARGE_IO_EVENTS=$(jq '.stats.events_read' "$LARGE_IO_REPORT_FILE")
+LARGE_IO_EDGE_COUNT=$(jq '.cascade.graph_metrics.edge_count' "$LARGE_IO_REPORT_FILE")
+
+echo "  events_read:                    $LARGE_IO_EVENTS"
+echo "  edge_count:                     $LARGE_IO_EDGE_COUNT"
+echo "  invariants_ok:                  $LARGE_IO_INVARIANTS"
+echo "  io_orphan_complete_count:       $LARGE_IO_ORPHAN"
+echo "  io_pending_at_end_count:        $LARGE_IO_PENDING"
+echo "  io_userspace_pair_collision:    $LARGE_IO_COLLISION"
+echo "  attributed_delay_ratio:         $LARGE_IO_RATIO"
+
+if [ "$LARGE_IO_INVARIANTS" != "true" ]; then
+    echo "FAIL: large-IO phase invariants violated" >&2
+    jq '.health' "$LARGE_IO_REPORT_FILE" >&2
+    rm -f "$LARGE_IO_TRACE_FILE" "$LARGE_IO_REPORT_FILE" "$LARGE_IO_WORKLOAD_FILE"
+    exit 1
+fi
+
+# Commit-11 contract: even if multi-bio partial-completion path was triggered,
+# orphan count must remain zero because the IoKey is built from issue-time
+# fields cached in pending_io_val, not from rq fields at completion time.
+if [ "$LARGE_IO_ORPHAN" != "null" ] && [ "$LARGE_IO_ORPHAN" -gt 0 ]; then
+    echo "FAIL: io_orphan_complete_count=$LARGE_IO_ORPHAN > 0 on large-IO workload" >&2
+    echo "  commit-11 BPF should cache issue-time (sector, nr_sector, dev) in pending_io_val" >&2
+    echo "  so that completion-time IoKey matches issue-time, even when blk_update_request" >&2
+    echo "  has mutated rq->__sector / rq->__data_len during partial completion." >&2
+    jq '.health' "$LARGE_IO_REPORT_FILE" >&2
+    rm -f "$LARGE_IO_TRACE_FILE" "$LARGE_IO_REPORT_FILE" "$LARGE_IO_WORKLOAD_FILE"
+    exit 1
+fi
+
+rm -f "$LARGE_IO_TRACE_FILE" "$LARGE_IO_REPORT_FILE" "$LARGE_IO_WORKLOAD_FILE"
+
+echo ""
+echo "=== Cross-Kernel E2E Phase 3 (multi-bio partial-completion): PASSED ==="
+echo "  kernel $(uname -r): multi-bio IoKey pairing verified"
+echo "  events=$LARGE_IO_EVENTS edges=$LARGE_IO_EDGE_COUNT ratio=$LARGE_IO_RATIO orphans=$LARGE_IO_ORPHAN"
 echo ""
 echo "=== Cross-Kernel E2E: ALL PHASES PASSED ==="

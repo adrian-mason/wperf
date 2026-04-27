@@ -352,9 +352,26 @@ struct {
 	__type(value, __u64);
 } io_counters SEC(".maps");
 
+/* Cached at issue time, read at complete time. We do NOT re-read sector /
+ * data_len / dev from `struct request` at completion: `blk_update_request`
+ * advances `__sector` and decrements `__data_len` BEFORE firing
+ * `block_rq_complete` on the second and subsequent invocations during
+ * partial / multi-bio completion (verified across 4.18 → 6.6 LTS). For
+ * single-call completion (Phase 2b CI dd workload) the rq fields are still
+ * stable at tracepoint fire, but multi-bio paths (PostgreSQL fsync /
+ * fio iodepth>1 / NVMe retries / SAN multipath) would mutate the
+ * (sector, nr_sector) tuple and break userspace IoKey pairing.
+ *
+ * Probe kernel-source audit msg=8202789c §1-2 + Critic msg=d1893b74 +
+ * Oracle msg=e645e54f + Challenger msg=01643e20 5-way convergent:
+ * cache issue-time values in BPF map, decoupled from kernel-internal
+ * blk_update_request mutation timing. */
 struct pending_io_val {
 	__u32 submitter_tgid;
 	__u32 submitter_tid;
+	__u64 sector;     /* issue-time `__sector` — stable across partial completion */
+	__u32 nr_sector;  /* issue-time `__data_len >> 9` — sectors of 512 bytes */
+	__u32 dev;        /* issue-time (major << 20 | first_minor) — rq_disk may be cleared at completion */
 };
 
 struct {
@@ -410,9 +427,15 @@ static __always_inline int handle_block_rq_issue(void *ctx, struct request *rq)
 		return 0;
 
 	__u64 key = (__u64)(unsigned long)rq;
+	__u64 sector = BPF_CORE_READ(rq, __sector);
+	__u32 nr_sector = (__u32)(BPF_CORE_READ(rq, __data_len) >> 9);
+	__u32 dev = rq_dev(rq);
 	struct pending_io_val val = {
 		.submitter_tgid = tgid,
 		.submitter_tid  = tid,
+		.sector         = sector,
+		.nr_sector      = nr_sector,
+		.dev            = dev,
 	};
 	if (bpf_map_update_elem(&pending_io, &key, &val, BPF_ANY) != 0) {
 		io_counter_inc(IO_CNT_PENDING_DROP);
@@ -428,12 +451,11 @@ static __always_inline int handle_block_rq_issue(void *ctx, struct request *rq)
 	e->pid = tgid;
 	e->tid = tid;
 
-	__u64 sector = BPF_CORE_READ(rq, __sector);
 	e->prev_tid = (__u32)sector;
 	e->next_tid = (__u32)(sector >> 32);
 
-	e->prev_pid = rq_dev(rq);
-	e->next_pid = BPF_CORE_READ(rq, __data_len) >> 9;
+	e->prev_pid = dev;
+	e->next_pid = nr_sector;
 	e->prev_state = 0;
 
 	submit_buf(ctx, e, sizeof(*e));
@@ -469,12 +491,15 @@ static __always_inline int handle_block_rq_complete(void *ctx, struct request *r
 	e->pid = val->submitter_tgid;
 	e->tid = val->submitter_tid;
 
-	__u64 sector = BPF_CORE_READ(rq, __sector);
-	e->prev_tid = (__u32)sector;
-	e->next_tid = (__u32)(sector >> 32);
+	/* Read (sector, nr_sector, dev) from the cached val instead of the rq:
+	 * the userspace IoKey requires issue-time values to pair correctly
+	 * with the IoIssue event. See `struct pending_io_val` doc-comment for
+	 * the kernel-source rationale. */
+	e->prev_tid = (__u32)val->sector;
+	e->next_tid = (__u32)(val->sector >> 32);
 
-	e->prev_pid = rq_dev(rq);
-	e->next_pid = BPF_CORE_READ(rq, __data_len) >> 9;
+	e->prev_pid = val->dev;
+	e->next_pid = val->nr_sector;
 	e->prev_state = 0;
 
 	submit_buf(ctx, e, sizeof(*e));
