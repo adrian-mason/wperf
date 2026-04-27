@@ -322,14 +322,52 @@ if [ "$LARGE_IO_INVARIANTS" != "true" ]; then
     exit 1
 fi
 
-# Commit-11 contract: even if multi-bio partial-completion path was triggered,
-# orphan count must remain zero because the IoKey is built from issue-time
-# fields cached in pending_io_val, not from rq fields at completion time.
+# Commit-12 pair-conservation invariant per Oracle msg=f39c50c7 §4
+# (strengthens commit-11's single `io_orphan_complete_count == 0` to a
+# three-way invariant covering both pairing failure modes + collision):
+#
+#   io_orphan_complete_count == 0  → every IoComplete paired with an IoIssue
+#                                    (commit-11 contract: completion-time
+#                                    IoKey comes from cached val, not from
+#                                    rq fields that blk_update_request may
+#                                    have mutated)
+#   io_pending_at_end_count == 0   → every IoIssue paired with an IoComplete
+#                                    (no IoIssue stranded in pending_io
+#                                    HashMap when capture ended; multi-bio
+#                                    requests fully drained)
+#   io_userspace_pair_collision_count == 0
+#                                  → no IoKey collisions in pending_io
+#                                    (would surface if (dev, sector,
+#                                    nr_sector) tuple isn't unique enough
+#                                    on this workload — last-writer-wins
+#                                    drops the prior pending entry)
+#
+# Conjunction = full pair-conservation invariant: every IoIssue maps 1-to-1
+# to an IoComplete with stable IoKey across the partial-completion path.
+PAIR_CONSERVATION_FAIL=0
 if [ "$LARGE_IO_ORPHAN" != "null" ] && [ "$LARGE_IO_ORPHAN" -gt 0 ]; then
     echo "FAIL: io_orphan_complete_count=$LARGE_IO_ORPHAN > 0 on large-IO workload" >&2
     echo "  commit-11 BPF should cache issue-time (sector, nr_sector, dev) in pending_io_val" >&2
     echo "  so that completion-time IoKey matches issue-time, even when blk_update_request" >&2
     echo "  has mutated rq->__sector / rq->__data_len during partial completion." >&2
+    PAIR_CONSERVATION_FAIL=1
+fi
+if [ "$LARGE_IO_PENDING" != "null" ] && [ "$LARGE_IO_PENDING" -gt 0 ]; then
+    echo "FAIL: io_pending_at_end_count=$LARGE_IO_PENDING > 0 on large-IO workload" >&2
+    echo "  IoIssue events without matching IoComplete — partial-completion bio chain" >&2
+    echo "  was not fully drained, OR IoKey at issue/complete diverged for this request." >&2
+    PAIR_CONSERVATION_FAIL=1
+fi
+if [ "$LARGE_IO_COLLISION" != "null" ] && [ "$LARGE_IO_COLLISION" -gt 0 ]; then
+    echo "FAIL: io_userspace_pair_collision_count=$LARGE_IO_COLLISION > 0 on large-IO workload" >&2
+    echo "  Two IoIssue events shared the same (dev, sector, nr_sector) IoKey before the" >&2
+    echo "  first paired with its IoComplete — last-writer-wins dropped the prior pending" >&2
+    echo "  entry. If this fires under realistic workloads, the IoKey is not unique enough" >&2
+    echo "  and the event ABI may need to carry struct request* (Gemini PR #120 review)." >&2
+    PAIR_CONSERVATION_FAIL=1
+fi
+if [ "$PAIR_CONSERVATION_FAIL" -ne 0 ]; then
+    echo "FAIL: pair-conservation invariant violated on multi-bio workload" >&2
     jq '.health' "$LARGE_IO_REPORT_FILE" >&2
     rm -f "$LARGE_IO_TRACE_FILE" "$LARGE_IO_REPORT_FILE" "$LARGE_IO_WORKLOAD_FILE"
     exit 1
