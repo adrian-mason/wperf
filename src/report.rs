@@ -7,6 +7,7 @@
 //! This is NOT the final §1.2 / §5.1 self-contained HTML report (Phase 3).
 //! See plan v2 for the explicit JSON field inventory and deferred fields.
 
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufWriter, Read, Seek, Write};
 
@@ -124,6 +125,41 @@ pub struct HealthMetrics {
     pub cascade_depth_truncation_count: Option<u64>,
     /// Wakeup edges pruned by the spurious wakeup filter (§2.5).
     pub false_wakeup_filtered_count: Option<u64>,
+
+    // --- Block-IO attribution health (Phase 2b #38 commit-5) ---------------
+    /// `IoComplete` events with no matching `IoIssue` in the userspace
+    /// `pending_io` map. Populated if block-IO tracing ran, else `None`.
+    pub io_orphan_complete_count: Option<u64>,
+    /// `IoIssue` records still pending when correlation ended (no matching
+    /// `IoComplete` arrived before capture stopped). Populated if block-IO
+    /// tracing ran, else `None`.
+    pub io_pending_at_end_count: Option<u64>,
+    /// `IoIssue` events that overwrote an existing `pending_io` entry due
+    /// to a `(dev, sector, nr_sector)` key collision. Guardrail for the
+    /// collision window Gemini flagged on PR #120 — if this fires under
+    /// real workloads, the event ABI needs to carry `struct request *`.
+    pub io_userspace_pair_collision_count: Option<u64>,
+    /// Per-pseudo-thread block-IO attribution ratios, keyed by the IO
+    /// pseudo-thread label (`"disk"`, `"nic"`, `"softirq"`).
+    ///
+    /// Encodes the §7.3 per-P quantification verbatim: for each IO
+    /// pseudo-thread `P`, `attributed_delay_ratio(P) = Σ(e.attributed_delay_ms)
+    /// / Σ(e.raw_wait_ms)` over edges where `e.dst == P` AND
+    /// `e.kind != EdgeKind::SyntheticClosureReturn`. Pseudo-threads whose
+    /// raw-wait sum is zero (all sub-ms I/Os collapsed to zero-duration
+    /// windows) are **omitted** from the map, matching the §7.3 P-level
+    /// `None` semantic.
+    ///
+    /// Outer `None` encodes §7.3 condition (b) — the hard precondition
+    /// that at least one IO pseudo-thread has a defined ratio. The Phase
+    /// 2b gate is `not None AND every value in [0.70, 1.0]`. CI tri-state
+    /// mapping (gate fail / pass / N/A) is applied at the test-runner
+    /// level per §7.3 multi-pseudo-thread scope (a)+(b).
+    ///
+    /// Phase 2c forward-compat: when NIC/Softirq pseudo-threads enter the
+    /// WFG, they will appear as additional keys (`"nic"`, `"softirq"`)
+    /// alongside `"disk"` with no spec amendment required.
+    pub attributed_delay_ratio: Option<BTreeMap<String, f64>>,
 }
 
 /// CLI entry point: opens the file, runs the pipeline, writes output to stdout.
@@ -194,6 +230,12 @@ pub fn build_report<R: Read + Seek>(
     let unmatched_wakeup_count = stats.correlation.unmatched_wakeup_count;
     let false_wakeup_filtered_count = stats.correlation.false_wakeup_filtered_count;
 
+    let io_orphan_complete_count = Some(stats.correlation.io_orphan_complete_count);
+    let io_pending_at_end_count = Some(stats.correlation.io_pending_at_end_count);
+    let io_userspace_pair_collision_count =
+        Some(stats.correlation.io_userspace_pair_collision_count);
+    let attributed_delay_ratio = compute_io_attributed_delay_ratio(&cascaded);
+
     Ok(ReportOutput {
         cascade,
         critical_path,
@@ -206,8 +248,97 @@ pub fn build_report<R: Read + Seek>(
             partial_stack_count: None,
             cascade_depth_truncation_count: None,
             false_wakeup_filtered_count: Some(false_wakeup_filtered_count),
+            io_orphan_complete_count,
+            io_pending_at_end_count,
+            io_userspace_pair_collision_count,
+            attributed_delay_ratio,
         },
     })
+}
+
+/// Compute the Phase 2b `attributed_delay_ratio` per the formal §7.3
+/// definition (final-design.md, post-PR-#121 amendment), returning a
+/// **per-IO-pseudo-thread** map.
+///
+/// For each IO pseudo-thread `P`:
+///
+/// `attributed_delay_ratio(P) = Σ(e.attributed_delay_ms) / Σ(e.raw_wait_ms)`
+///
+/// over every edge `e` where `e.dst == P` AND
+/// `e.kind != EdgeKind::SyntheticClosureReturn`. Closure-return edges
+/// are SCC bookkeeping per [ADR-009 *Amendment 2026-04-25*](../decisions/ADR-009.md)
+/// and have no semantic wait time.
+///
+/// Map keys are stable IO-pseudo-thread labels (`"disk"`, `"nic"`,
+/// `"softirq"`). Pseudo-threads with no inbound non-SCR edges, or whose
+/// raw-wait sum is zero (typical of sub-millisecond IO bursts where
+/// ns→ms truncation collapses windows), are **omitted** from the map —
+/// the §7.3 P-level `None` semantic.
+///
+/// Outer `None` encodes §7.3 condition (b): the hard precondition that
+/// at least one IO pseudo-thread has a defined ratio. A workload that
+/// produces no defined per-P ratio at all fails the Phase 2b gate,
+/// preventing silent-pass under cascade bugs that zero out upstream
+/// `raw_wait`. CI tri-state mapping (gate fail / pass / N/A) is applied
+/// at the test-runner level per §7.3 multi-pseudo-thread scope (a)+(b).
+///
+/// Per-P (not aggregate) is mandatory per §7.3 (a) "for every IO
+/// pseudo-thread `P` with a defined `attributed_delay_ratio(P)` ≥ 0.70".
+/// Aggregate would mask Phase 2c regressions (e.g. DISK 1.0 + NIC 0.5
+/// → aggregate 0.75 ✓ silently masks NIC ≥ 0.70 violation). 5-way
+/// reviewer convergence locked per-P contract on 2026-04-27 (Oracle
+/// msg=62ec6c36 + Probe msg=a1f9b1bf + Critic msg=5bcd369d + Challenger
+/// msg=a21b9b2b + Maestro msg=54b49254).
+fn compute_io_attributed_delay_ratio(
+    cascaded: &crate::graph::wfg::WaitForGraph,
+) -> Option<BTreeMap<String, f64>> {
+    use crate::graph::types::{EdgeKind, NodeKind};
+
+    // Per-P accumulators keyed by IO-pseudo-thread label.
+    let mut per_p_raw: BTreeMap<&'static str, u64> = BTreeMap::new();
+    let mut per_p_attr: BTreeMap<&'static str, u64> = BTreeMap::new();
+
+    for (_, _, dst_tid, weight) in cascaded.all_edges() {
+        let Some(idx) = cascaded.node_index(&dst_tid) else {
+            continue;
+        };
+        // §7.3 predicate: `e.dst` is an IO pseudo-thread.
+        let label = match cascaded.node_weight(idx).kind {
+            NodeKind::PseudoDisk => "disk",
+            NodeKind::PseudoNic => "nic",
+            NodeKind::PseudoSoftirq => "softirq",
+            _ => continue,
+        };
+        // §7.3 predicate: `e.kind != EdgeKind::SyntheticClosureReturn`.
+        if weight.kind == EdgeKind::SyntheticClosureReturn {
+            continue;
+        }
+        *per_p_raw.entry(label).or_insert(0) += weight.raw_wait_ms;
+        *per_p_attr.entry(label).or_insert(0) += weight.attributed_delay_ms;
+    }
+
+    // Compute per-P ratio; omit Ps whose raw_sum is zero (P-level None
+    // per §7.3 — observed but no measurable wait time).
+    let mut result: BTreeMap<String, f64> = BTreeMap::new();
+    for (&label, &raw_sum) in &per_p_raw {
+        if raw_sum == 0 {
+            continue;
+        }
+        let attr_sum = per_p_attr.get(&label).copied().unwrap_or(0);
+        // u64→f64 cast: precision loss past 2^53 ms is well outside any
+        // single capture window. Values are bounded by `raw_sum`.
+        #[allow(clippy::cast_precision_loss)]
+        let ratio = attr_sum as f64 / raw_sum as f64;
+        result.insert(label.to_string(), ratio);
+    }
+
+    // §7.3 (b) hard precondition: at least one IO pseudo-thread has a
+    // defined ratio. Empty map → outer `None` (gate failure: workload
+    // did not exercise the IO Attribution subject).
+    if result.is_empty() {
+        return None;
+    }
+    Some(result)
 }
 
 #[cfg(test)]
@@ -259,6 +390,77 @@ mod tests {
             prev_state: 0,
             flags: 0,
         }
+    }
+
+    #[test]
+    fn attributed_delay_ratio_none_when_no_io_edges() {
+        // Non-IO graph: ratio should be None (not measured).
+        use crate::graph::types::{NodeKind, TimeWindow};
+        use crate::graph::wfg::WaitForGraph;
+
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(100), NodeKind::UserThread);
+        g.add_node(ThreadId(200), NodeKind::UserThread);
+        g.add_edge(ThreadId(100), ThreadId(200), TimeWindow::new(0, 100));
+
+        assert_eq!(compute_io_attributed_delay_ratio(&g), None);
+    }
+
+    #[test]
+    fn attributed_delay_ratio_some_on_io_edges() {
+        // Inbound edges to a pseudo-thread destination contribute to its
+        // per-P entry. The Disk→User direction has dst=UserThread (not an
+        // IO pseudo-thread), so it is excluded; only User→Disk counts.
+        use crate::graph::types::{DISK_TID, NodeKind, TimeWindow, WaitType};
+        use crate::graph::wfg::WaitForGraph;
+
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(100), NodeKind::UserThread);
+        g.add_node(ThreadId(DISK_TID), NodeKind::PseudoDisk);
+        // User→Disk (IoBlock), raw=10 — counts (dst=PseudoDisk).
+        g.add_edge_with_wait_type(
+            ThreadId(100),
+            ThreadId(DISK_TID),
+            TimeWindow::new(0, 10),
+            WaitType::IoBlock,
+        );
+        // Disk→User (IoBlock), raw=10 — excluded (dst=UserThread).
+        g.add_edge_with_wait_type(
+            ThreadId(DISK_TID),
+            ThreadId(100),
+            TimeWindow::new(0, 10),
+            WaitType::IoBlock,
+        );
+
+        // EdgeWeight::new sets raw_wait_ms = attributed_delay_ms = duration,
+        // so the per-P ratio pre-cascade equals 1.0 for "disk".
+        let map = compute_io_attributed_delay_ratio(&g).expect("IO edges present");
+        let disk = map.get("disk").copied().expect("disk entry present");
+        assert!(
+            (disk - 1.0).abs() < 1e-9,
+            "expected disk ratio=1.0, got {disk}"
+        );
+        assert_eq!(map.len(), 1, "only disk pseudo-thread observed");
+    }
+
+    #[test]
+    fn attributed_delay_ratio_none_when_all_io_edges_zero_duration() {
+        // Sub-ms I/Os collapse to zero-duration windows. Ratio is undefined
+        // when the raw denominator sums to zero — must return None, not NaN.
+        use crate::graph::types::{DISK_TID, NodeKind, TimeWindow, WaitType};
+        use crate::graph::wfg::WaitForGraph;
+
+        let mut g = WaitForGraph::new();
+        g.add_node(ThreadId(100), NodeKind::UserThread);
+        g.add_node(ThreadId(DISK_TID), NodeKind::PseudoDisk);
+        g.add_edge_with_wait_type(
+            ThreadId(100),
+            ThreadId(DISK_TID),
+            TimeWindow::new(5, 5),
+            WaitType::IoBlock,
+        );
+
+        assert_eq!(compute_io_attributed_delay_ratio(&g), None);
     }
 
     #[test]

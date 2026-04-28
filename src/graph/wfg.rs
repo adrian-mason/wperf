@@ -63,6 +63,30 @@ impl WaitForGraph {
         )
     }
 
+    /// Add an ADR-009 synthetic closure-return edge (cascade-terminal).
+    ///
+    /// The edge is annotated with `wait_type` for downstream report
+    /// rendering and marked with `EdgeKind::SyntheticClosureReturn` so
+    /// that `sweep_line_partition` and `count_concurrent_waiters` skip
+    /// it during cascade redistribution. The edge still participates
+    /// in Tarjan SCC analysis and Knot detection (final-design.md
+    /// §3.3).
+    pub fn add_synthetic_closure_return(
+        &mut self,
+        src: ThreadId,
+        dst: ThreadId,
+        window: TimeWindow,
+        wait_type: WaitType,
+    ) -> EdgeIndex {
+        let src_idx = *self.node_map.get(&src).expect("src node not in graph");
+        let dst_idx = *self.node_map.get(&dst).expect("dst node not in graph");
+        self.graph.add_edge(
+            src_idx,
+            dst_idx,
+            EdgeWeight::synthetic_closure_return(window, wait_type),
+        )
+    }
+
     /// Get the `ThreadId` for a `NodeIndex`.
     pub fn thread_id(&self, idx: NodeIndex) -> ThreadId {
         self.graph[idx].tid
@@ -148,13 +172,24 @@ impl WaitForGraph {
         for (&tid, &idx) in &self.node_map {
             new.add_node(tid, self.graph[idx].kind);
         }
-        // Clone edges
+        // Clone edges — preserve wait_type AND kind across cascade so
+        // downstream consumers (HealthMetrics attributed_delay_ratio,
+        // DOT rendering, SCC annotations, and the cascade engine's own
+        // SCR filter) can inspect per-edge semantics after redistribution.
+        // Direct EdgeWeight clone + attribution reset replaces the older
+        // factory-dispatch match — fewer arms, single source of truth for
+        // per-edge state. NodeIndex must be resolved through `node_map`
+        // because `new` was rebuilt in sorted-tid order (BTreeMap), so its
+        // NodeIndex assignments do not match `self.graph`.
         for eidx in self.graph.edge_indices() {
             let (src, dst) = self.graph.edge_endpoints(eidx).unwrap();
             let src_tid = self.graph[src].tid;
             let dst_tid = self.graph[dst].tid;
-            let weight = &self.graph[eidx];
-            new.add_edge(src_tid, dst_tid, weight.time_window);
+            let new_src = new.node_map[&src_tid];
+            let new_dst = new.node_map[&dst_tid];
+            let mut new_weight = self.graph[eidx].clone();
+            new_weight.attributed_delay_ms = new_weight.raw_wait_ms;
+            new.graph.add_edge(new_src, new_dst, new_weight);
         }
         new
     }

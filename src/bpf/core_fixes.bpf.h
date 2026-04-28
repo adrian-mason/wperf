@@ -5,8 +5,15 @@
  * Upstream commit: 82ad428c40cb270fda6c0de5a9914705c94dd4c7
  * Source: https://github.com/iovisor/bcc/blob/master/libbpf-tools/core_fixes.bpf.h
  *
- * Only the task_struct state/\__state rename fix is included here.
- * Other CO-RE fixes from upstream are not needed by wPerf.
+ * Vendored sections (allowlist — keep in sync with scripts/sync-libbpf-compat.sh):
+ *   - task_struct state/\__state rename fix (used by src/bpf/wperf.bpf.c sched path)
+ *   - bio \__o/\__x + get_gendisk()           — bio → gendisk CO-RE helper
+ *   - trace_event_raw_block_rq_complete[ion]  — handler-struct rename detector
+ *   - request \__x + request_queue \__x + get_disk() — rq → gendisk CO-RE helper
+ *     (rq_disk removal — commit f3fa33acca9f; needed by Phase 2b issue #38 P2b-01)
+ *
+ * Other CO-RE fixes from upstream (renamedata, kmem, inet_sock, cfs_rq) are not
+ * used by wPerf and intentionally omitted.
  *
  * To update, run: scripts/sync-libbpf-compat.sh
  */
@@ -38,6 +45,85 @@ static __always_inline __s64 get_task_state(void *task)
 	if (bpf_core_field_exists(t->__state))
 		return BPF_CORE_READ(t, __state);
 	return BPF_CORE_READ((struct task_struct___o *)task, state);
+}
+
+/**
+ * commit 309dca309fc3 ("block: store a block_device pointer in struct bio")
+ * adds a new member bi_bdev which is a pointer to struct block_device
+ * see:
+ *     https://github.com/torvalds/linux/commit/309dca309fc3
+ */
+struct bio___o {
+	struct gendisk *bi_disk;
+} __attribute__((preserve_access_index));
+
+struct bio___x {
+	struct block_device *bi_bdev;
+} __attribute__((preserve_access_index));
+
+static __always_inline struct gendisk *get_gendisk(void *bio)
+{
+	struct bio___x *b = bio;
+
+	if (bpf_core_field_exists(b->bi_bdev))
+		return BPF_CORE_READ(b, bi_bdev, bd_disk);
+	return BPF_CORE_READ((struct bio___o *)bio, bi_disk);
+}
+
+/**
+ * commit d5869fdc189f ("block: introduce block_rq_error tracepoint")
+ * adds a new tracepoint block_rq_error and it shares the same arguments
+ * with tracepoint block_rq_complete. As a result, the kernel BTF now has
+ * a `struct trace_event_raw_block_rq_completion` instead of
+ * `struct trace_event_raw_block_rq_complete`.
+ * see:
+ *     https://github.com/torvalds/linux/commit/d5869fdc189f
+ */
+struct trace_event_raw_block_rq_complete___x {
+	dev_t dev;
+	sector_t sector;
+	unsigned int nr_sector;
+} __attribute__((preserve_access_index));
+
+struct trace_event_raw_block_rq_completion___x {
+	dev_t dev;
+	sector_t sector;
+	unsigned int nr_sector;
+} __attribute__((preserve_access_index));
+
+static __always_inline bool has_block_rq_completion()
+{
+	if (bpf_core_type_exists(struct trace_event_raw_block_rq_completion___x))
+		return true;
+	return false;
+}
+
+/**
+ * commit d152c682f03c ("block: add an explicit ->disk backpointer to the
+ * request_queue") and commit f3fa33acca9f ("block: remove the ->rq_disk
+ * field in struct request") make some changes to `struct request` and
+ * `struct request_queue`. Now, to get the `struct gendisk *` field in a CO-RE
+ * way, we need both `struct request` and `struct request_queue`.
+ * see:
+ *     https://github.com/torvalds/linux/commit/d152c682f03c
+ *     https://github.com/torvalds/linux/commit/f3fa33acca9f
+ */
+struct request_queue___x {
+	struct gendisk *disk;
+} __attribute__((preserve_access_index));
+
+struct request___x {
+	struct request_queue___x *q;
+	struct gendisk *rq_disk;
+} __attribute__((preserve_access_index));
+
+static __always_inline struct gendisk *get_disk(void *request)
+{
+	struct request___x *r = request;
+
+	if (bpf_core_field_exists(r->rq_disk))
+		return BPF_CORE_READ(r, rq_disk);
+	return BPF_CORE_READ(r, q, disk);
 }
 
 #endif /* __CORE_FIXES_BPF_H */

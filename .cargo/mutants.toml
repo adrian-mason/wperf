@@ -18,6 +18,19 @@ exclude_re = [
     "probe_bpf_loop",
     "probe_tp_btf",
     "probe_fentry",
+    # Phase 2b #38 P2b-01 (commit-2): block_rq BTF arity probe + helpers.
+    # All cfg(feature = "bpf")-gated, require BTF + libbpf to exercise.
+    "probe_block_rq_issue_single_arg",
+    "btf_typedef_func_proto_vlen",
+    "btf_kind",
+    "btf_vlen",
+    "kernel_version_ge",
+    "BtfGuard",
+    # Equivalent mutant: `|` vs `^` are indistinguishable when operands
+    # occupy disjoint bit regions. WperfEvent::io_sector packs prev_tid
+    # (lower 32 bits) with next_tid << 32 (upper 32 bits) — by construction
+    # the bit regions never overlap, so `|` → `^` has no observable effect.
+    "WperfEvent::io_sector",
     "record_impl",
     "poll_ringbuf",
     "poll_perfarray",

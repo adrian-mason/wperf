@@ -1,5 +1,6 @@
 ---
 source: tests/snapshot_tests.rs
+assertion_line: 247
 expression: json
 ---
 cascade:
@@ -24,10 +25,14 @@ critical_path:
       weight: 2
   total_weight: 6
 health:
+  attributed_delay_ratio: ~
   cascade_depth_truncation_count: ~
   drop_count: 5
   false_wakeup_filtered_count: 0
   invariants_ok: true
+  io_orphan_complete_count: 0
+  io_pending_at_end_count: 0
+  io_userspace_pair_collision_count: 0
   partial_stack_count: ~
   unmatched_wakeup_count: 0
 knots: []
@@ -36,7 +41,11 @@ stats:
     edges_created: 1
     events_processed: 3
     false_wakeup_filtered_count: 0
+    io_orphan_complete_count: 0
+    io_pending_at_end_count: 0
+    io_userspace_pair_collision_count: 0
     switch_in_without_waker_count: 0
+    unknown_event_type_count: 0
     unmatched_switch_in_count: 1
     unmatched_wakeup_count: 0
   events_read: 3

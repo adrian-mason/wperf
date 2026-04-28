@@ -3,14 +3,27 @@
 #
 # This script documents the provenance of vendored BPF headers:
 #   - src/bpf/compat.bpf.h  (reserve_buf/submit_buf transport abstraction)
-#   - src/bpf/core_fixes.bpf.h (CO-RE field rename fixes, e.g. state/__state)
+#   - src/bpf/core_fixes.bpf.h (CO-RE field rename fixes)
+#
+# Vendored allowlist for core_fixes.bpf.h (subset of upstream — keep in sync
+# with the "Vendored sections" comment in src/bpf/core_fixes.bpf.h):
+#   - task_struct state/__state rename          (sched path)
+#   - bio bi_disk/bi_bdev + get_gendisk()        (block layer, bio side)
+#   - trace_event_raw_block_rq_complete[ion]    (block_rq_error struct rename)
+#   - request rq_disk + request_queue->disk
+#     + get_disk()                               (block layer, rq side — needed
+#                                                 by Phase 2b #38 P2b-01)
+# Upstream helpers NOT vendored: renamedata, kmem_alloc/free, inet_sock
+# bitfields, cfs_rq nr_running. Add here + in core_fixes.bpf.h if/when used.
 #
 # Fetches directly from iovisor/bcc GitHub repo (no local clone needed).
 # By default, fetches at the pinned upstream commits recorded in the vendored
 # file headers. Pass --ref <sha-or-branch> to compare against a different ref.
 #
 # Vendored files are NOT verbatim copies — they are adapted for wPerf.
-# When updating, diff the upstream changes and manually apply relevant fixes.
+# When updating, diff the upstream changes and manually apply relevant fixes
+# that fall within the allowlist above. Expansions to the allowlist require
+# updating both this script's doc comment and core_fixes.bpf.h's header.
 #
 # Usage: ./scripts/sync-libbpf-compat.sh [--ref <sha-or-branch>]
 #   Default: fetches at the pinned upstream commits from vendored file headers

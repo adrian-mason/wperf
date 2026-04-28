@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use serde::Serialize;
 
 use crate::format::event::{EventType, WperfEvent, futex_op};
-use crate::graph::types::{NodeKind, ThreadId, TimeWindow, WaitType};
+use crate::graph::types::{DISK_TID, NodeKind, ThreadId, TimeWindow, WaitType};
 use crate::graph::wfg::WaitForGraph;
 
 /// Linux `TASK_RUNNING` state value. A `sched_switch` with `prev_state == 0`
@@ -88,6 +88,56 @@ struct PendingEdge {
     wait_type: Option<WaitType>,
 }
 
+/// Key identifying an in-flight block I/O request in userspace.
+///
+/// BPF already pairs issue/complete kernel-side via `struct request *`, but
+/// that pointer is not propagated to userspace (ABI-unstable, and emitting
+/// it would add 8 bytes to every IO event — requires an event-layout
+/// version bump which is out of scope for #38). Userspace re-pairs using
+/// the tuple `(dev, sector, nr_sector)` carried on both `IoIssue` and
+/// `IoComplete` events.
+///
+/// **Collision surface** (Gemini review, PR #120): `(dev, sector)` alone is
+/// not globally unique for in-flight requests — two concurrent reads or a
+/// read+write targeting the same start sector would collide and misattribute
+/// on completion. Adding `nr_sector` narrows the window substantially (same
+/// dev + same start sector + same size is rare in practice — block layer
+/// serializes writes at the same LBA, and merged/split requests change
+/// `nr_sector`). The residual risk is observed in commit-5 via an
+/// `io_userspace_pair_collision_count` counter; if it fires in real
+/// workloads we bump the event ABI to carry `struct request *` as an opaque
+/// `u64` ID (Gemini's preferred long-term fix).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct IoKey {
+    dev: u32,
+    sector: u64,
+    nr_sector: u32,
+}
+
+impl IoKey {
+    fn from_event(event: &WperfEvent) -> Self {
+        Self {
+            dev: event.io_dev(),
+            sector: event.io_sector(),
+            nr_sector: event.io_nr_sector(),
+        }
+    }
+}
+
+/// State retained between an `IoIssue` and its matching `IoComplete`.
+///
+/// Submitter attribution is taken verbatim from the event — BPF already
+/// records the submitter at issue time and re-stamps it onto the completion
+/// event, so `pid`/`tid` on the `IoComplete` event refer to the original
+/// submitter regardless of which task the softirq/IRQ completion ran on
+/// (ADR-009 §3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PendingIo {
+    submitter_tgid: u32,
+    submitter_tid: u32,
+    issue_ts_ns: u64,
+}
+
 /// Statistics from the correlation pass.
 ///
 /// # Canonical vs diagnostic metrics
@@ -114,6 +164,30 @@ pub struct CorrelationStats {
     /// Edges filtered as spurious wakeups (on-CPU < threshold after wakeup).
     /// **Canonical coverage metric** (§2.5 / §3.8).
     pub false_wakeup_filtered_count: u64,
+    /// Events whose `event_type` byte did not match any known `EventType`
+    /// discriminant. Safety net for forward-compatible BPF→userspace bisects
+    /// across multi-commit PR ranges — a new BPF discriminant shipped before
+    /// the matching Rust variant lands is dropped here rather than panicking.
+    /// *Internal diagnostic stat* — not a canonical coverage metric.
+    pub unknown_event_type_count: u64,
+
+    // --- Block-IO synthetic edge health (Phase 2b #38 commit-5) -------------
+    // See `HealthMetrics` in src/report.rs for the exported contract.
+    /// `IoComplete` events with no matching `pending_io` entry. Causes:
+    /// BPF dropped the paired `IoIssue` (per-CPU buffer full), the issue
+    /// predates BPF attach, or the userspace key collided.
+    pub io_orphan_complete_count: u64,
+    /// `IoIssue` records still in `pending_io` when correlation ends — no
+    /// matching `IoComplete` arrived before the capture terminated. Upper
+    /// bound on "in-flight I/O at exit"; excessive values suggest capture
+    /// was truncated mid-I/O.
+    pub io_pending_at_end_count: u64,
+    /// `IoIssue` events that overwrote an existing `pending_io` entry with
+    /// the same `(dev, sector, nr_sector)` key. Observability guardrail
+    /// for the collision window Gemini flagged on PR #120 (review id
+    /// 3118320504). If this fires under real workloads, the event ABI
+    /// needs to carry `struct request *` as an opaque `u64`.
+    pub io_userspace_pair_collision_count: u64,
 }
 
 /// Correlate a globally timestamp-sorted event stream into a `WaitForGraph`.
@@ -144,6 +218,7 @@ pub fn correlate_events(
     let mut off_cpu: HashMap<u32, OffCpuRecord> = HashMap::new();
     let mut pending_futex: HashMap<u32, PendingFutex> = HashMap::new();
     let mut pending_edges: HashMap<u32, PendingEdge> = HashMap::new();
+    let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
 
     for event in events {
         stats.events_processed += 1;
@@ -171,13 +246,32 @@ pub fn correlate_events(
             Some(EventType::FutexWait) => {
                 handle_futex_wait(event, &mut pending_futex);
             }
-            None => {}
+            Some(EventType::IoIssue) => {
+                handle_io_issue(event, &mut pending_io, &mut stats);
+            }
+            Some(EventType::IoComplete) => {
+                handle_io_complete(event, &mut pending_io, &mut graph, &mut stats);
+            }
+            None => {
+                if stats.unknown_event_type_count == 0 {
+                    eprintln!(
+                        "correlate: unknown event_type discriminant {} at ts_ns={} — dropping (forward-compat bisect guard; further occurrences suppressed, see unknown_event_type_count)",
+                        event.event_type, event.timestamp_ns
+                    );
+                }
+                stats.unknown_event_type_count += 1;
+            }
         }
     }
 
     for (_, pe) in pending_edges.drain() {
         add_edge_from_pending(&mut graph, pe, &mut stats);
     }
+
+    // Pending-at-end: I/Os whose issue arrived but whose completion never
+    // landed before the capture ended. Safe to cast — u64 holds any
+    // plausible in-flight count (max_entries = 16 384 on BPF side).
+    stats.io_pending_at_end_count = pending_io.len() as u64;
 
     (graph, stats)
 }
@@ -299,6 +393,83 @@ fn handle_futex_wait(event: &WperfEvent, pending_futex: &mut HashMap<u32, Pendin
     );
 }
 
+/// Handle a `block_rq_issue` event — record the in-flight request so the
+/// matching `block_rq_complete` can recover `(submitter, issue_ts)`.
+///
+/// Collisions (same `IoKey` already in the map) are counted and the
+/// pre-existing entry is overwritten (last-writer-wins, matching BPF's
+/// `bpf_map_update_elem(.., BPF_ANY)` semantics).
+fn handle_io_issue(
+    event: &WperfEvent,
+    pending_io: &mut HashMap<IoKey, PendingIo>,
+    stats: &mut CorrelationStats,
+) {
+    let previous = pending_io.insert(
+        IoKey::from_event(event),
+        PendingIo {
+            submitter_tgid: event.pid,
+            submitter_tid: event.tid,
+            issue_ts_ns: event.timestamp_ns,
+        },
+    );
+    if previous.is_some() {
+        stats.io_userspace_pair_collision_count += 1;
+    }
+}
+
+/// Handle a `block_rq_complete` event — drain the matching issue record
+/// and emit the bidirectional User↔PseudoDisk synthetic edge pair.
+///
+/// Per ADR-009 §Consequences, Phase 2b uses a single `DISK_TID` pseudo-thread
+/// for all block I/O — per-device pseudo-disks (`block_device:<dev>`) are
+/// deferred to a future issue. The paper's two-edge construction (User→Disk
+/// for initiation, Disk→User for completion) produces a 2-cycle SCC so that
+/// Tarjan analysis can identify I/O-bound Knots; both edges share the same
+/// time window (`issue_ts` → `complete_ts` = service time) and are annotated
+/// with `WaitType::IoBlock`.
+///
+/// Orphan completions (no matching `pending_io` entry — issue was dropped,
+/// predates attach, or key collided) return without mutating the graph and
+/// are counted into `io_orphan_complete_count`.
+fn handle_io_complete(
+    event: &WperfEvent,
+    pending_io: &mut HashMap<IoKey, PendingIo>,
+    graph: &mut WaitForGraph,
+    stats: &mut CorrelationStats,
+) {
+    let Some(pending) = pending_io.remove(&IoKey::from_event(event)) else {
+        stats.io_orphan_complete_count += 1;
+        return;
+    };
+
+    // ns → ms truncation — sub-millisecond I/Os (common on NVMe) collapse to
+    // zero-duration windows. This preserves the edge for SCC participation
+    // without introducing floating-point; cascade handles duration==0 windows
+    // correctly (raw_wait = attributed_delay = 0 satisfies I-2 / I-7).
+    let issue_ms = pending.issue_ts_ns / 1_000_000;
+    let complete_ms = event.timestamp_ns / 1_000_000;
+    let window = TimeWindow::new(issue_ms, complete_ms.max(issue_ms));
+
+    let user = ThreadId(i64::from(pending.submitter_tid));
+    let disk = ThreadId(DISK_TID);
+
+    graph.add_node(user, NodeKind::UserThread);
+    graph.add_node(disk, NodeKind::PseudoDisk);
+    // Forward (issue) edge — real wait dependency, normal cascade traversal.
+    graph.add_edge_with_wait_type(user, disk, window, WaitType::IoBlock);
+    // Return (completion) edge — ADR-009 *Amendment 2026-04-25*
+    // cascade-terminal. Participates in Tarjan SCC analysis and Knot
+    // detection; cascade engine skips it via the
+    // `EdgeKind::SyntheticClosureReturn` marker in both
+    // `sweep_line_partition` (outgoing-traversal) and
+    // `count_concurrent_waiters` (incoming-edge enumerator). P2c
+    // PseudoNic / PseudoSoftirq mirror return edges MUST reuse this
+    // same constructor when they land — the marker is type-system-
+    // enforced via `EdgeWeight::synthetic_closure_return`.
+    graph.add_synthetic_closure_return(disk, user, window, WaitType::IoBlock);
+    stats.edges_created += 2;
+}
+
 /// Handle a `sched_wakeup` or `sched_wakeup_new` event.
 ///
 /// Records the waker for an off-CPU thread. Last-wake-wins policy:
@@ -389,6 +560,66 @@ mod tests {
         assert_eq!(graph.node_count(), 0);
         assert_eq!(stats.events_processed, 0);
         assert_eq!(stats.edges_created, 0);
+    }
+
+    #[test]
+    fn unknown_event_type_drops_and_counts() {
+        // Forward-compat bisect guard: a BPF discriminant shipped ahead of
+        // the matching Rust variant must drop safely with counter increment,
+        // never panic. Simulates commit-2-ships-before-commit-3 window.
+        let mut bad = WperfEvent {
+            timestamp_ns: 1_000_000,
+            pid: 100,
+            tid: 101,
+            prev_tid: 0,
+            next_tid: 0,
+            prev_pid: 0,
+            next_pid: 0,
+            cpu: 0,
+            event_type: 99,
+            prev_state: 0,
+            flags: 0,
+        };
+        let (graph, stats) = correlate(&[bad]);
+        assert_eq!(graph.node_count(), 0);
+        assert_eq!(stats.edges_created, 0);
+        assert_eq!(stats.unknown_event_type_count, 1);
+        assert_eq!(stats.events_processed, 1);
+
+        // Multiple unknown events accumulate.
+        bad.timestamp_ns = 2_000_000;
+        let (_, stats2) = correlate(&[bad, bad]);
+        assert_eq!(stats2.unknown_event_type_count, 2);
+    }
+
+    #[test]
+    fn io_discriminants_known_and_emit_synthetic_edge_pair() {
+        // commit-4: a paired IoIssue + IoComplete emits the bidirectional
+        // User↔Disk synthetic edge pair. Discriminants must NOT count as
+        // unknown, and the pair must be annotated with WaitType::IoBlock.
+        let io_issue = WperfEvent {
+            timestamp_ns: 1_000_000,
+            pid: 100,
+            tid: 101,
+            prev_tid: 0,
+            next_tid: 0,
+            prev_pid: 0,
+            next_pid: 0,
+            cpu: 0,
+            event_type: EventType::IoIssue as u8,
+            prev_state: 0,
+            flags: 0,
+        };
+        let io_complete = WperfEvent {
+            event_type: EventType::IoComplete as u8,
+            timestamp_ns: 2_000_000,
+            ..io_issue
+        };
+        let (graph, stats) = correlate(&[io_issue, io_complete]);
+        assert_eq!(graph.node_count(), 2, "user + DISK pseudo-thread");
+        assert_eq!(stats.edges_created, 2, "bidirectional synthetic pair");
+        assert_eq!(stats.unknown_event_type_count, 0);
+        assert_eq!(stats.events_processed, 2);
     }
 
     #[test]
@@ -980,5 +1211,313 @@ mod tests {
         assert_eq!(stats.false_wakeup_filtered_count, 2);
         assert_eq!(stats.edges_created, 0);
         assert_eq!(graph.edge_count(), 0);
+    }
+
+    // --- IO dispatch lifecycle (commit-3) -----------------------------------
+    //
+    // The handlers are tested directly rather than through `correlate()`
+    // because commit-3 deliberately produces no observable output (no edges,
+    // no counters — those are commit-4 / commit-5). The only state visible
+    // in-scope is `pending_io`, which lives inside `correlate_events` and is
+    // not exposed to callers.
+
+    // tgid / tid mirror WperfEvent field names — clippy false positive
+    #[allow(clippy::similar_names)]
+    fn io_issue_event_sized(
+        ts: u64,
+        tgid: u32,
+        tid: u32,
+        dev: u32,
+        sector: u64,
+        nr_sector: u32,
+    ) -> WperfEvent {
+        WperfEvent {
+            timestamp_ns: ts,
+            pid: tgid,
+            tid,
+            // io_sector() packs prev_tid | next_tid<<32
+            prev_tid: u32::try_from(sector & 0xFFFF_FFFF).unwrap(),
+            next_tid: u32::try_from(sector >> 32).unwrap(),
+            // io_dev() reads prev_pid
+            prev_pid: dev,
+            // io_nr_sector() reads next_pid
+            next_pid: nr_sector,
+            cpu: 0,
+            event_type: EventType::IoIssue as u8,
+            prev_state: 0,
+            flags: 0,
+        }
+    }
+
+    #[allow(clippy::similar_names)]
+    fn io_issue_event(ts: u64, tgid: u32, tid: u32, dev: u32, sector: u64) -> WperfEvent {
+        io_issue_event_sized(ts, tgid, tid, dev, sector, 8)
+    }
+
+    #[allow(clippy::similar_names)]
+    fn io_complete_event_sized(
+        ts: u64,
+        tgid: u32,
+        tid: u32,
+        dev: u32,
+        sector: u64,
+        nr_sector: u32,
+    ) -> WperfEvent {
+        WperfEvent {
+            event_type: EventType::IoComplete as u8,
+            ..io_issue_event_sized(ts, tgid, tid, dev, sector, nr_sector)
+        }
+    }
+
+    #[allow(clippy::similar_names)]
+    fn io_complete_event(ts: u64, tgid: u32, tid: u32, dev: u32, sector: u64) -> WperfEvent {
+        io_complete_event_sized(ts, tgid, tid, dev, sector, 8)
+    }
+
+    #[test]
+    fn handle_io_issue_records_submitter_and_ts() {
+        let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let mut stats = CorrelationStats::default();
+        let ev = io_issue_event(1_000_000, 100, 101, 0x800_0002, 0xDEAD_BEEF_0000_1234);
+
+        handle_io_issue(&ev, &mut pending_io, &mut stats);
+
+        assert_eq!(pending_io.len(), 1);
+        assert_eq!(stats.io_userspace_pair_collision_count, 0);
+        let key = IoKey {
+            dev: 0x800_0002,
+            sector: 0xDEAD_BEEF_0000_1234,
+            nr_sector: 8,
+        };
+        let rec = pending_io.get(&key).expect("IoKey must match");
+        assert_eq!(rec.submitter_tgid, 100);
+        assert_eq!(rec.submitter_tid, 101);
+        assert_eq!(rec.issue_ts_ns, 1_000_000);
+    }
+
+    #[test]
+    fn handle_io_complete_drains_matching_issue_and_emits_edges() {
+        let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let mut graph = WaitForGraph::new();
+        let mut stats = CorrelationStats::default();
+        let issue = io_issue_event(1_000_000, 100, 101, 0x800_0002, 0x1000);
+        let complete = io_complete_event(1_500_000, 100, 101, 0x800_0002, 0x1000);
+
+        handle_io_issue(&issue, &mut pending_io, &mut stats);
+        handle_io_complete(&complete, &mut pending_io, &mut graph, &mut stats);
+
+        assert!(pending_io.is_empty(), "issue/complete pair must drain");
+        assert_eq!(stats.edges_created, 2, "bidirectional pair = 2 edges");
+        assert_eq!(graph.node_count(), 2, "user + DISK pseudo-thread");
+
+        // Both directions present with WaitType::IoBlock.
+        let edges = graph.all_edges();
+        let user = ThreadId(101);
+        let disk = ThreadId(DISK_TID);
+        assert!(edges.iter().any(|(_, s, d, w)| *s == user
+            && *d == disk
+            && w.wait_type == Some(WaitType::IoBlock)));
+        assert!(edges.iter().any(|(_, s, d, w)| *s == disk
+            && *d == user
+            && w.wait_type == Some(WaitType::IoBlock)));
+    }
+
+    #[test]
+    fn handle_io_complete_without_matching_issue_counts_orphan() {
+        // Orphan completion: BPF dropped the issue (per-CPU buffer full),
+        // buffer reorder/truncation, or key collided.
+        let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let mut graph = WaitForGraph::new();
+        let mut stats = CorrelationStats::default();
+        let complete = io_complete_event(1_500_000, 100, 101, 0x800_0002, 0x1000);
+
+        handle_io_complete(&complete, &mut pending_io, &mut graph, &mut stats);
+
+        assert!(pending_io.is_empty());
+        assert_eq!(stats.edges_created, 0);
+        assert_eq!(graph.node_count(), 0);
+        assert_eq!(stats.io_orphan_complete_count, 1, "orphan must be counted");
+    }
+
+    #[test]
+    fn pending_io_keyed_by_dev_sector_nr_sector() {
+        // Two devices, same sector — must NOT collide. `dev` is the first
+        // disambiguator in the IoKey tuple.
+        let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let mut stats = CorrelationStats::default();
+        let issue_dev1 = io_issue_event(1_000_000, 100, 101, 0x800_0001, 0x2000);
+        let issue_dev2 = io_issue_event(1_000_001, 200, 201, 0x800_0002, 0x2000);
+
+        handle_io_issue(&issue_dev1, &mut pending_io, &mut stats);
+        handle_io_issue(&issue_dev2, &mut pending_io, &mut stats);
+
+        assert_eq!(pending_io.len(), 2);
+        assert_eq!(stats.io_userspace_pair_collision_count, 0);
+
+        // Completing dev1's IO must not touch dev2's entry.
+        let complete_dev1 = io_complete_event(1_500_000, 100, 101, 0x800_0001, 0x2000);
+        let mut graph = WaitForGraph::new();
+        handle_io_complete(&complete_dev1, &mut pending_io, &mut graph, &mut stats);
+
+        assert_eq!(pending_io.len(), 1);
+        let dev2_key = IoKey {
+            dev: 0x800_0002,
+            sector: 0x2000,
+            nr_sector: 8,
+        };
+        assert!(pending_io.contains_key(&dev2_key));
+    }
+
+    #[test]
+    fn pending_io_same_dev_same_sector_different_size_no_collision() {
+        // Gemini PR #120 review: `(dev, sector)` alone is not globally unique
+        // for in-flight requests — two concurrent reads or a read+write
+        // targeting the same starting sector would collide. Including
+        // `nr_sector` in IoKey must let them pair independently.
+        let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let mut stats = CorrelationStats::default();
+        let small = io_issue_event_sized(1_000_000, 100, 101, 0x800_0001, 0x2000, 1);
+        let large = io_issue_event_sized(1_000_001, 200, 201, 0x800_0001, 0x2000, 16);
+
+        handle_io_issue(&small, &mut pending_io, &mut stats);
+        handle_io_issue(&large, &mut pending_io, &mut stats);
+
+        assert_eq!(pending_io.len(), 2, "different nr_sector must not collide");
+        assert_eq!(stats.io_userspace_pair_collision_count, 0);
+
+        // Completing the large request must not disturb the small one.
+        let complete_large = io_complete_event_sized(1_500_000, 200, 201, 0x800_0001, 0x2000, 16);
+        let mut graph = WaitForGraph::new();
+        handle_io_complete(&complete_large, &mut pending_io, &mut graph, &mut stats);
+
+        assert_eq!(pending_io.len(), 1);
+        let small_key = IoKey {
+            dev: 0x800_0001,
+            sector: 0x2000,
+            nr_sector: 1,
+        };
+        let rec = pending_io[&small_key];
+        assert_eq!(rec.submitter_tgid, 100);
+        assert_eq!(rec.submitter_tid, 101);
+    }
+
+    #[test]
+    fn concurrent_same_device_multiple_pending() {
+        // Typical case: one tgid submits multiple IOs in flight concurrently
+        // to the same device. Each (dev, sector) is independent.
+        let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let mut stats = CorrelationStats::default();
+        for sector in [0x1000u64, 0x2000, 0x3000, 0x4000] {
+            let ev = io_issue_event(1_000_000 + sector, 100, 101, 0x800_0001, sector);
+            handle_io_issue(&ev, &mut pending_io, &mut stats);
+        }
+
+        assert_eq!(pending_io.len(), 4);
+
+        // Out-of-order completions (NVMe queue reorder is realistic).
+        let mut graph = WaitForGraph::new();
+        for sector in [0x3000u64, 0x1000, 0x4000, 0x2000] {
+            let ev = io_complete_event(2_000_000 + sector, 100, 101, 0x800_0001, sector);
+            handle_io_complete(&ev, &mut pending_io, &mut graph, &mut stats);
+        }
+
+        assert!(pending_io.is_empty());
+        assert_eq!(stats.edges_created, 8, "4 I/Os × 2 edges = 8");
+        assert_eq!(stats.io_orphan_complete_count, 0);
+    }
+
+    #[test]
+    fn repeated_issue_same_key_overwrites() {
+        // A rare case: same (dev, sector) seen twice before any complete.
+        // Possible causes: BPF dropped an intermediate complete, or block
+        // layer reissued a request. Last-writer-wins is the safe default —
+        // matches BPF-side `bpf_map_update_elem(.., BPF_ANY)` semantics
+        // (wperf.bpf.c handle_block_rq_issue).
+        let mut pending_io: HashMap<IoKey, PendingIo> = HashMap::new();
+        let mut stats = CorrelationStats::default();
+        let first = io_issue_event(1_000_000, 100, 101, 0x800_0001, 0x1000);
+        let second = io_issue_event(2_000_000, 200, 201, 0x800_0001, 0x1000);
+
+        handle_io_issue(&first, &mut pending_io, &mut stats);
+        handle_io_issue(&second, &mut pending_io, &mut stats);
+
+        assert_eq!(pending_io.len(), 1);
+        assert_eq!(
+            stats.io_userspace_pair_collision_count, 1,
+            "second issue with same IoKey must be counted as collision"
+        );
+        let key = IoKey {
+            dev: 0x800_0001,
+            sector: 0x1000,
+            nr_sector: 8,
+        };
+        let rec = pending_io[&key];
+        assert_eq!(rec.submitter_tgid, 200);
+        assert_eq!(rec.submitter_tid, 201);
+        assert_eq!(rec.issue_ts_ns, 2_000_000);
+    }
+
+    #[test]
+    fn io_stream_through_correlate_events_creates_edge_per_pair() {
+        // End-to-end: one completed I/O pair emits 2 edges (User↔Disk), a
+        // dangling issue (pending-at-end) emits nothing.
+        let events = vec![
+            io_issue_event(1_000_000, 100, 101, 0x800_0001, 0x1000),
+            io_complete_event(1_500_000, 100, 101, 0x800_0001, 0x1000),
+            io_issue_event(2_000_000, 200, 201, 0x800_0002, 0x2000),
+            // No matching complete for this second issue — pending-at-end.
+        ];
+
+        let (graph, stats) = correlate(&events);
+
+        assert_eq!(graph.node_count(), 2, "T101 + DISK (T201 never landed)");
+        assert_eq!(stats.edges_created, 2);
+        assert_eq!(stats.unknown_event_type_count, 0);
+        assert_eq!(stats.events_processed, 3);
+        assert_eq!(
+            stats.io_pending_at_end_count, 1,
+            "T201's unpaired issue must count as pending-at-end"
+        );
+        assert_eq!(stats.io_orphan_complete_count, 0);
+    }
+
+    #[test]
+    fn io_edges_form_scc_for_tarjan() {
+        // Sanity: the bidirectional pair must form a 2-cycle (User→Disk→User)
+        // so Tarjan SCC analysis can identify I/O-bound Knots per ADR-009.
+        // A non-cycling single edge would route I/O threads into a Sink
+        // Collector and miss the Knot classification.
+        let events = vec![
+            io_issue_event(1_000_000, 100, 101, 0x800_0001, 0x1000),
+            io_complete_event(1_500_000, 100, 101, 0x800_0001, 0x1000),
+        ];
+        let (graph, _) = correlate(&events);
+        let user = ThreadId(101);
+        let disk = ThreadId(DISK_TID);
+        let edges = graph.all_edges();
+
+        let forward = edges
+            .iter()
+            .any(|(_, s, d, w)| *s == user && *d == disk && w.wait_type == Some(WaitType::IoBlock));
+        let back = edges
+            .iter()
+            .any(|(_, s, d, w)| *s == disk && *d == user && w.wait_type == Some(WaitType::IoBlock));
+        assert!(
+            forward && back,
+            "must have both directions for SCC formation"
+        );
+
+        // Windows must match: service time is shared across both directions.
+        let forward_weight = edges
+            .iter()
+            .find(|(_, s, d, _)| *s == user && *d == disk)
+            .map(|(_, _, _, w)| w.time_window)
+            .unwrap();
+        let back_weight = edges
+            .iter()
+            .find(|(_, s, d, _)| *s == disk && *d == user)
+            .map(|(_, _, _, w)| w.time_window)
+            .unwrap();
+        assert_eq!(forward_weight, back_weight);
     }
 }
