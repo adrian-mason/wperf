@@ -244,7 +244,7 @@ The cascade algorithm redistributes wait time from direct waiters to root-cause 
 
 - `path.insert` / `path.remove` outside the recursion loop (BUG-1 fix)
 - `child_subtree_absorbed = propagated_down + child_self_blame` (NEW-BUG-1 fix: leaf nodes must not have zero blame)
-- `sweep_line_partition` for O(N log N) time-slice partitioning ensuring weight conservation
+- `sweep_line_partition` for O(N log N) time-slice partitioning across concurrent waiters (per-edge `attributed_delay_ms` updated within each elementary interval; no separate "total weight" invariant — see [ADR-016](../decisions/ADR-016.md) for I-1 retirement)
 - Maximum recursion depth of 10 (practical limit for real workloads); if exceeded, the branch is truncated and `cascade_depth_truncation_count` is incremented
 - Complexity: O(E × D × log K) where D=recursion depth ≤10, K=concurrent holders typically <5, effectively near-linear
 

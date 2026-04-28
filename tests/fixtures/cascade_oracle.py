@@ -247,7 +247,10 @@ def test_figure4():
     Expected cascade result:
     - Network attributed: 80ms (the overlap [20,100))
     - Parser attributed: 20ms (the non-overlapping [0,20))
-    - Total: 100ms (weight conservation)
+    - Total: 100ms (matches the original User wait window;
+      reasonability check on this Figure 4 graph, not a strict invariant
+      — I-1 was retired by ADR-016, production sentinel is `invariants_ok`
+      = I-2 ∧ I-7).
 
     Graph:
         User --[0,100]--> Parser --[20,100]--> Network
